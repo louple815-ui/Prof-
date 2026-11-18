@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.credentials.CredentialManager
@@ -514,7 +515,14 @@ private fun MainAppScaffold(
                                     selected = currentRoute == tab.route,
                                     onClick = { navigateTopTab(tab.route) },
                                     icon = { Icon(tab.icon, contentDescription = tab.label) },
-                                    label = { Text(tab.label, maxLines = 1) },
+                                    label = {
+                                        Text(
+                                            text = tab.label,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    },
                                     modifier = Modifier.testTag(tab.testTag)
                                 )
                             }

@@ -562,8 +562,8 @@ service cloud.firestore {
     }
 
     match /group_members/{memberDocId} {
-      allow get: if isSignedIn() && isValidId(memberDocId) && (resource.data.visibility == 'PUBLIC' || resource.data.userId == request.auth.uid || isModerator());
-      allow list: if isSignedIn() && (resource.data.visibility == 'PUBLIC' || resource.data.userId == request.auth.uid || isModerator());
+      allow get: if isSignedIn() && isValidId(memberDocId) && (resource.data.visibility == 'PUBLIC' || resource.data.userId == request.auth.uid || get(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.ownerId == request.auth.uid || isModerator());
+      allow list: if isSignedIn() && (resource.data.visibility == 'PUBLIC' || resource.data.userId == request.auth.uid || get(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.ownerId == request.auth.uid || isModerator());
 
       allow create: if isSignedIn() && isValidId(memberDocId) &&
                        isValidGroupMember(incoming()) &&

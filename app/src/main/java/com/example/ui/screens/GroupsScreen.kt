@@ -74,6 +74,7 @@ fun GroupsScreen(
     val memberships by communityViewModel.myMemberships.collectAsStateWithLifecycle()
     val groupPosts by communityViewModel.selectedGroupPosts.collectAsStateWithLifecycle()
     val groupMembers by communityViewModel.selectedGroupMembers.collectAsStateWithLifecycle()
+    val pendingMembers by communityViewModel.selectedGroupPendingMembers.collectAsStateWithLifecycle()
 
     var selectedDomain by remember { mutableStateOf("Tous") }
     var activeGroup by remember { mutableStateOf<Group?>(null) }
@@ -95,12 +96,15 @@ fun GroupsScreen(
             isOwner = group.ownerId == currentUser.userId,
             posts = groupPosts,
             members = groupMembers,
+            pendingMembers = pendingMembers,
             onBack = {
                 activeGroup = null
                 communityViewModel.selectGroup(null)
             },
             onJoin = { communityViewModel.joinGroup(group, currentUser) },
             onLeave = { communityViewModel.leaveGroup(group) },
+            onApproveMember = { userId -> communityViewModel.approveGroupMember(group.id, userId) },
+            onRejectMember = { userId -> communityViewModel.rejectGroupMember(group.id, userId) },
             onPublishPost = { text -> communityViewModel.publishGroupPost(currentUser, group.id, text) }
         )
         return
@@ -232,9 +236,12 @@ private fun GroupDetailPane(
     isOwner: Boolean,
     posts: List<com.example.data.model.Post>,
     members: List<com.example.data.model.GroupMember>,
+    pendingMembers: List<com.example.data.model.GroupMember>,
     onBack: () -> Unit,
     onJoin: () -> Unit,
     onLeave: () -> Unit,
+    onApproveMember: (String) -> Unit,
+    onRejectMember: (String) -> Unit,
     onPublishPost: (String) -> Unit
 ) {
     var postDraft by remember { mutableStateOf("") }
@@ -258,10 +265,12 @@ private fun GroupDetailPane(
                     Text("${group.membersCount} membre(s) • ${group.privacy}", style = MaterialTheme.typography.bodySmall)
                 }
                 if (!isOwner) {
-                    if (isMember) {
-                        TextButton(onClick = onLeave) { Text("Quitter") }
-                    } else if (!isPending) {
-                        Button(onClick = onJoin) { Text("Rejoindre") }
+                    when {
+                        isMember -> TextButton(onClick = onLeave) { Text("Quitter") }
+                        isPending -> TextButton(onClick = onLeave) { Text("Annuler demande") }
+                        else -> Button(onClick = onJoin) {
+                            Text(if (group.privacy == "PUBLIC") "Rejoindre" else "Demander")
+                        }
                     }
                 }
             }
@@ -303,6 +312,26 @@ private fun GroupDetailPane(
                                 }
                             ) {
                                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Publier")
+                            }
+                        }
+                    }
+                }
+
+                if (isOwner && pendingMembers.isNotEmpty()) {
+                    item {
+                        Text("Demandes en attente (${pendingMembers.size})", style = MaterialTheme.typography.titleSmall)
+                    }
+                    items(pendingMembers, key = { "pending_${it.id}" }) { pending ->
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().padding(12.dp)
+                            ) {
+                                UserAvatar(displayName = pending.userName, size = 34.dp)
+                                Spacer(Modifier.width(10.dp))
+                                Text(pending.userName, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { onRejectMember(pending.userId) }) { Text("Refuser") }
+                                Button(onClick = { onApproveMember(pending.userId) }) { Text("Accepter") }
                             }
                         }
                     }

@@ -176,10 +176,32 @@ class GroupRepository(
         }
     }
 
+    fun observeGroupAllMembersForOwner(groupId: String): Flow<List<GroupMember>> = flow {
+        val path = "group_members"
+        emitAll(
+            db.collection("group_members")
+                .whereEqualTo("groupId", groupId)
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(GroupMember::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }
+                .catch { error ->
+                    val fsError = generateSequence(error) { it.cause }.filterIsInstance<FirebaseFirestoreException>().firstOrNull()
+                    if (fsError == null && error is CancellationException) throw error
+                    if (auth.currentUser != null) handleFirestoreError(fsError ?: error, OperationType.LIST, path)
+                    throw error
+                }
+        )
+    }
+
     suspend fun joinGroup(group: Group, userName: String, userRole: String): Result<Unit> {
         val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Non connecté"))
         val memberRef = db.collection("group_members").document("${group.id}_$uid")
         return try {
+            val existing = try { memberRef.get().await() } catch (_: Exception) { null }
+            if (existing?.exists() == true) {
+                return Result.success(Unit)
+            }
             val status = if (group.privacy == "PUBLIC") "ACTIVE" else "PENDING"
             val batch = db.batch()
             batch.set(
@@ -198,7 +220,7 @@ class GroupRepository(
             if (status == "ACTIVE") {
                 batch.update(
                     db.collection("groups").document(group.id),
-                    mapOf("membersCount" to group.membersCount + 1L, "updatedAt" to FieldValue.serverTimestamp())
+                    mapOf("membersCount" to FieldValue.increment(1L), "updatedAt" to FieldValue.serverTimestamp())
                 )
             }
             batch.commit().await()
@@ -215,14 +237,52 @@ class GroupRepository(
         val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Non connecté"))
         val memberRef = db.collection("group_members").document("${group.id}_$uid")
         return try {
+            val existing = try { memberRef.get().await() } catch (_: Exception) { null }
+            val wasActive = existing?.getString("status") == "ACTIVE"
             val batch = db.batch()
             batch.delete(memberRef)
-            val nextCount = (group.membersCount - 1L).coerceAtLeast(1L)
+            if (wasActive && group.membersCount > 1L) {
+                batch.update(
+                    db.collection("groups").document(group.id),
+                    mapOf("membersCount" to FieldValue.increment(-1L), "updatedAt" to FieldValue.serverTimestamp())
+                )
+            }
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, memberRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun approveMemberRequest(groupId: String, memberUserId: String): Result<Unit> {
+        val memberRef = db.collection("group_members").document("${groupId}_$memberUserId")
+        val groupRef = db.collection("groups").document(groupId)
+        return try {
+            requireUserId()
+            val batch = db.batch()
+            batch.update(memberRef, mapOf("status" to "ACTIVE"))
             batch.update(
-                db.collection("groups").document(group.id),
-                mapOf("membersCount" to nextCount, "updatedAt" to FieldValue.serverTimestamp())
+                groupRef,
+                mapOf("membersCount" to FieldValue.increment(1L), "updatedAt" to FieldValue.serverTimestamp())
             )
             batch.commit().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, memberRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun rejectMemberRequest(groupId: String, memberUserId: String): Result<Unit> {
+        val memberRef = db.collection("group_members").document("${groupId}_$memberUserId")
+        return try {
+            requireUserId()
+            memberRef.delete().await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e

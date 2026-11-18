@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -145,13 +146,14 @@ fun AuthScreen(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(16.dp)
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(50))
                         .clickable { onLanguageToggle(if (currentLanguage == "fr") "en" else "fr") }
                         .testTag("language_toggle_button")
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Icon(Icons.Filled.Language, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))

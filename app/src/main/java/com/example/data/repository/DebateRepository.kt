@@ -154,35 +154,40 @@ class DebateRepository(
         val pollRef = db.collection("polls").document(poll.id)
         return try {
             require(optionIndex in poll.options.indices) { "Option invalide." }
-            val existingVote = voteRef.get().await()
-            if (existingVote.exists()) {
-                return Result.failure(IllegalStateException("Vous avez déjà voté pour ce sondage."))
-            }
-            val updatedCounts = poll.optionCounts.toMutableList()
-            while (updatedCounts.size < poll.options.size) updatedCounts.add(0L)
-            updatedCounts[optionIndex] = updatedCounts[optionIndex] + 1L
+            db.runTransaction { tx ->
+                val existingVote = tx.get(voteRef)
+                if (existingVote.exists()) {
+                    throw IllegalStateException("Vous avez déjà voté pour ce sondage.")
+                }
+                val freshPoll = tx.get(pollRef)
+                @Suppress("UNCHECKED_CAST")
+                val rawCounts = (freshPoll.get("optionCounts") as? List<Number>)?.map { it.toLong() }
+                    ?: poll.optionCounts
+                val updatedCounts = rawCounts.toMutableList()
+                while (updatedCounts.size < poll.options.size) updatedCounts.add(0L)
+                updatedCounts[optionIndex] = updatedCounts[optionIndex] + 1L
+                val freshTotal = freshPoll.getLong("totalVotes") ?: poll.totalVotes
 
-            val batch = db.batch()
-            batch.set(
-                voteRef,
-                mapOf(
-                    "pollId" to poll.id,
-                    "debateId" to poll.debateId,
-                    "userId" to uid,
-                    "optionIndex" to optionIndex.toLong(),
-                    "visibility" to "PUBLIC",
-                    "createdAt" to FieldValue.serverTimestamp()
+                tx.set(
+                    voteRef,
+                    mapOf(
+                        "pollId" to poll.id,
+                        "debateId" to poll.debateId,
+                        "userId" to uid,
+                        "optionIndex" to optionIndex.toLong(),
+                        "visibility" to "PUBLIC",
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
                 )
-            )
-            batch.update(
-                pollRef,
-                mapOf(
-                    "optionCounts" to updatedCounts,
-                    "totalVotes" to poll.totalVotes + 1L,
-                    "updatedAt" to FieldValue.serverTimestamp()
+                tx.update(
+                    pollRef,
+                    mapOf(
+                        "optionCounts" to updatedCounts,
+                        "totalVotes" to freshTotal + 1L,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
                 )
-            )
-            batch.commit().await()
+            }.await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e

@@ -29,6 +29,7 @@ import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +67,7 @@ fun AdminDashboardScreen(
     onBack: () -> Unit
 ) {
     BackHandler(onBack = onBack)
+    LaunchedEffect(isAdmin) { adminViewModel.setAdminAccess(isAdmin) }
 
     val reports by adminViewModel.reports.collectAsStateWithLifecycle()
     val verifications by adminViewModel.verificationRequests.collectAsStateWithLifecycle()
@@ -159,7 +161,9 @@ fun AdminDashboardScreen(
                     }
 
                     1 -> {
-                        if (verifications.isEmpty()) {
+                        if (!isAdmin) {
+                            ProfPlusEmptyState("Accès réservé aux administrateurs", "La validation des comptes et établissements nécessite les droits d'administrateur.")
+                        } else if (verifications.isEmpty()) {
                             ProfPlusEmptyState("Aucune demande de vérification", "Les demandes soumises apparaîtront ici.")
                         } else {
                             LazyColumn(
@@ -254,7 +258,7 @@ fun AdminDashboardScreen(
                                             }
                                             RoleChip(user.role)
                                         }
-                                        if (user.userId != currentUser.userId) {
+                                        if (isAdmin && user.userId != currentUser.userId) {
                                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                 OutlinedButton(
                                                     onClick = {
@@ -263,22 +267,20 @@ fun AdminDashboardScreen(
                                                 ) {
                                                     Text(if (user.suspended) "Réactiver" else "Suspendre")
                                                 }
-                                                if (isAdmin) {
-                                                    val nextRole = if (user.role == UserRole.MODERATEUR.name) {
-                                                        UserRole.ENSEIGNANT
-                                                    } else {
-                                                        UserRole.MODERATEUR
+                                                val nextRole = if (user.role == UserRole.MODERATEUR.name) {
+                                                    UserRole.ENSEIGNANT
+                                                } else {
+                                                    UserRole.MODERATEUR
+                                                }
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        adminViewModel.assignRole(user.userId, nextRole, currentUser.displayName)
                                                     }
-                                                    OutlinedButton(
-                                                        onClick = {
-                                                            adminViewModel.assignRole(user.userId, nextRole, currentUser.displayName)
-                                                        }
-                                                    ) {
-                                                        Text(
-                                                            if (nextRole == UserRole.MODERATEUR) "Nommer Modérateur"
-                                                            else "Retirer Modérateur"
-                                                        )
-                                                    }
+                                                ) {
+                                                    Text(
+                                                        if (nextRole == UserRole.MODERATEUR) "Nommer Modérateur"
+                                                        else "Retirer Modérateur"
+                                                    )
                                                 }
                                             }
                                         }

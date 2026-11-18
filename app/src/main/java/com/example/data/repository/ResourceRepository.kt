@@ -116,7 +116,7 @@ class ResourceRepository(
                 if (auth.currentUser != null && resource.id.isNotBlank()) {
                     db.collection("resources").document(resource.id).update(
                         mapOf(
-                            "downloadsCount" to resource.downloadsCount + 1L,
+                            "downloadsCount" to FieldValue.increment(1L),
                             "updatedAt" to FieldValue.serverTimestamp()
                         )
                     ).await()

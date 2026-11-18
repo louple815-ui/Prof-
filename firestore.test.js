@@ -526,3 +526,324 @@ test("Groups, resources, establishments, notifications, reports, and verificatio
     })
   );
 });
+
+test("FieldValue.increment atomic counters work under Firestore rules", async () => {
+  const { createRequire } = require("node:module");
+  const r = createRequire(require.resolve("@firebase/rules-unit-testing"));
+  const firebase = r("firebase/compat/app");
+  r("firebase/compat/firestore");
+  const FV = firebase.firestore.FieldValue;
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const now = pastDate();
+
+  await assertSucceeds(
+    aliceDb.collection("posts").doc("post_inc").set({
+      authorId: ALICE_UID,
+      authorName: "Amina Ouédraogo",
+      authorRole: "ENSEIGNANT",
+      authorVerified: false,
+      content: "Test incrémentation atomique",
+      category: "Méthodes pédagogiques",
+      visibility: "PUBLIC",
+      likesCount: 0,
+      commentsCount: 0,
+      sharesCount: 0,
+      status: "ACTIVE",
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  await assertSucceeds(
+    bobDb.collection("posts").doc("post_inc").update({
+      likesCount: FV.increment(1),
+      updatedAt: FV.serverTimestamp(),
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("posts").doc("post_inc").update({
+      likesCount: FV.increment(-1),
+      updatedAt: FV.serverTimestamp(),
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("posts").doc("post_inc").update({
+      commentsCount: FV.increment(1),
+      updatedAt: FV.serverTimestamp(),
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("posts").doc("post_inc").update({
+      sharesCount: FV.increment(1),
+      updatedAt: FV.serverTimestamp(),
+    })
+  );
+  // Reject arbitrary +2 increment
+  await assertFails(
+    bobDb.collection("posts").doc("post_inc").update({
+      likesCount: FV.increment(2),
+      updatedAt: FV.serverTimestamp(),
+    })
+  );
+});
+
+test("Private group owner can list and approve pending members while outsiders cannot", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext("charlie_outsider").firestore();
+  const now = pastDate();
+
+  await assertSucceeds(
+    aliceDb.collection("groups").doc("grp_priv").set({
+      name: "Direction Lycées Centre",
+      description: "Groupe privé des chefs d'établissement.",
+      domain: "Établissement",
+      privacy: "PRIVATE",
+      ownerId: ALICE_UID,
+      ownerName: "Amina Ouédraogo",
+      membersCount: 1,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("group_members").doc(`grp_priv_${ALICE_UID}`).set({
+      groupId: "grp_priv",
+      userId: ALICE_UID,
+      userName: "Amina Ouédraogo",
+      userRole: "RESPONSABLE_ETABLISSEMENT",
+      memberRole: "OWNER",
+      status: "ACTIVE",
+      visibility: "PRIVATE",
+      joinedAt: now,
+    })
+  );
+
+  // Bob requests to join private group -> PENDING
+  await assertSucceeds(
+    bobDb.collection("group_members").doc(`grp_priv_${BOB_UID}`).set({
+      groupId: "grp_priv",
+      userId: BOB_UID,
+      userName: "Bob Kaboré",
+      userRole: "ENSEIGNANT",
+      memberRole: "MEMBER",
+      status: "PENDING",
+      visibility: "PRIVATE",
+      joinedAt: now,
+    })
+  );
+
+  // Charlie cannot read Bob's private membership or query all members of grp_priv
+  await assertFails(charlieDb.collection("group_members").doc(`grp_priv_${BOB_UID}`).get());
+  await assertFails(charlieDb.collection("group_members").where("groupId", "==", "grp_priv").get());
+
+  // Alice (group owner) can read Bob's pending membership doc and approve it atomically
+  await assertSucceeds(aliceDb.collection("group_members").doc(`grp_priv_${BOB_UID}`).get());
+  await assertSucceeds(aliceDb.collection("group_members").where("groupId", "==", "grp_priv").get());
+
+  // Charlie cannot approve Bob
+  await assertFails(charlieDb.collection("group_members").doc(`grp_priv_${BOB_UID}`).update({ status: "ACTIVE" }));
+
+  // Alice approves Bob and increments membersCount
+  const batch = aliceDb.batch();
+  batch.update(aliceDb.collection("group_members").doc(`grp_priv_${BOB_UID}`), { status: "ACTIVE" });
+  batch.update(aliceDb.collection("groups").doc("grp_priv"), { membersCount: 2, updatedAt: pastDate(1000) });
+  await assertSucceeds(batch.commit());
+});
+
+test("Suspended users are blocked from publishing, commenting, debating, or messaging", async () => {
+  const adminDb = testEnv.authenticatedContext(ADMIN_UID, { email: ADMIN_EMAIL, email_verified: true }).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const now = pastDate();
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection("users").doc(BOB_UID).set({
+      userId: BOB_UID,
+      firstName: "Bob",
+      lastName: "Kaboré",
+      displayName: "Bob Kaboré",
+      role: "ENSEIGNANT",
+      country: "Burkina Faso",
+      city: "Ouagadougou",
+      region: "Centre",
+      verified: false,
+      suspended: false,
+      discoverable: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+
+  // Admin suspends Bob
+  await assertSucceeds(
+    adminDb.collection("users").doc(BOB_UID).update({
+      suspended: true,
+      updatedAt: pastDate(1000),
+    })
+  );
+
+  // Suspended Bob cannot create post, comment, or debate
+  await assertFails(
+    bobDb.collection("posts").doc("post_susp").set({
+      authorId: BOB_UID,
+      authorName: "Bob Kaboré",
+      authorRole: "ENSEIGNANT",
+      authorVerified: false,
+      content: "Post interdit",
+      category: "Actualités",
+      visibility: "PUBLIC",
+      likesCount: 0,
+      commentsCount: 0,
+      sharesCount: 0,
+      status: "ACTIVE",
+      createdAt: pastDate(500),
+      updatedAt: pastDate(500),
+    })
+  );
+  await assertFails(
+    bobDb.collection("debates").doc("deb_susp").set({
+      authorId: BOB_UID,
+      authorName: "Bob Kaboré",
+      authorVerified: false,
+      title: "Débat interdit",
+      question: "Question bloquée ?",
+      category: "Pédagogie",
+      visibility: "PUBLIC",
+      status: "OPEN",
+      argumentsCount: 0,
+      createdAt: pastDate(500),
+      updatedAt: pastDate(500),
+    })
+  );
+});
+
+test("Moderator vs Admin RBAC boundary and Resource download/size enforcement", async () => {
+  const MOD_UID = "mod_user_bf";
+  const adminDb = testEnv.authenticatedContext(ADMIN_UID, { email: ADMIN_EMAIL, email_verified: true }).firestore();
+  const modDb = testEnv.authenticatedContext(MOD_UID, { email: "mod@bf.edu", email_verified: true }).firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const now = pastDate();
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await db.collection("moderators").doc(MOD_UID).set({
+      userId: MOD_UID,
+      assignedBy: ADMIN_UID,
+      createdAt: now,
+    });
+    await db.collection("users").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      firstName: "Amina",
+      lastName: "Ouédraogo",
+      displayName: "Amina Ouédraogo",
+      role: "ENSEIGNANT",
+      country: "Burkina Faso",
+      city: "Ouagadougou",
+      region: "Centre",
+      verified: false,
+      suspended: false,
+      discoverable: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.collection("reports").doc("rep_mod").set({
+      reporterId: ALICE_UID,
+      reporterName: "Amina",
+      targetType: "POST",
+      targetId: "post_1",
+      reason: "Spam",
+      status: "PENDING",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.collection("verification_requests").doc("ver_mod").set({
+      userId: ALICE_UID,
+      userName: "Amina",
+      targetType: "TEACHER",
+      targetId: ALICE_UID,
+      targetName: "Amina",
+      documentInfo: "Attestation MENAPLN 2026",
+      status: "PENDING",
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+
+  // Moderator can review reports & log moderation action
+  await assertSucceeds(
+    modDb.collection("reports").doc("rep_mod").update({
+      status: "REVIEWED",
+      reviewedBy: MOD_UID,
+      updatedAt: pastDate(1000),
+    })
+  );
+  // Moderator CANNOT verify users, suspend users, read admin_logs, or approve verification_requests
+  await assertFails(modDb.collection("admin_logs").get());
+  await assertFails(
+    modDb.collection("users").doc(ALICE_UID).update({ suspended: true, updatedAt: pastDate(1000) })
+  );
+  await assertFails(
+    modDb.collection("verification_requests").doc("ver_mod").update({
+      status: "APPROVED",
+      reviewedBy: MOD_UID,
+      updatedAt: pastDate(1000),
+    })
+  );
+  // Admin CAN suspend user
+  await assertSucceeds(
+    adminDb.collection("users").doc(ALICE_UID).update({ suspended: true, updatedAt: pastDate(1000) })
+  );
+
+  // Oversized resource (> 5MB) is rejected; valid resource +1 download succeeds
+  await assertFails(
+    aliceDb.collection("resources").doc("res_big").set({
+      title: "Fichier trop lourd",
+      resourceType: "PDF",
+      subject: "Physique",
+      level: "Lycée",
+      fileName: "gros.pdf",
+      mimeType: "application/pdf",
+      fileSizeBytes: 6000000,
+      authorId: ALICE_UID,
+      authorName: "Amina",
+      visibility: "PUBLIC",
+      downloadsCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  // Admin-reactivated or Bob valid resource creation + +1 download increment
+  const { createRequire } = require("node:module");
+  const r = createRequire(require.resolve("@firebase/rules-unit-testing"));
+  const firebase = r("firebase/compat/app");
+  r("firebase/compat/firestore");
+  const FV = firebase.firestore.FieldValue;
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  await assertSucceeds(
+    bobDb.collection("resources").doc("res_valid").set({
+      title: "Annales BAC Philo",
+      resourceType: "COURS",
+      subject: "Philosophie",
+      level: "Terminale",
+      fileName: "bac_philo.txt",
+      mimeType: "text/plain",
+      fileSizeBytes: 512,
+      contentBody: "Dissertation et commentaire...",
+      authorId: BOB_UID,
+      authorName: "Bob Kaboré",
+      visibility: "PUBLIC",
+      downloadsCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("resources").doc("res_valid").update({
+      downloadsCount: FV.increment(1),
+      updatedAt: FV.serverTimestamp(),
+    })
+  );
+});
+

@@ -10,17 +10,23 @@ import com.example.data.model.VerificationRequest
 import com.example.data.repository.AdminRepository
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class AdminViewModel(
     private val adminRepository: AdminRepository
 ) : ViewModel() {
+
+    private val _isAdmin = MutableStateFlow(false)
 
     val reports: StateFlow<List<ReportItem>> = adminRepository.observeReports()
         .catch { error ->
@@ -30,7 +36,10 @@ class AdminViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
-    val verificationRequests: StateFlow<List<VerificationRequest>> = adminRepository.observeVerificationRequests()
+    val verificationRequests: StateFlow<List<VerificationRequest>> = _isAdmin
+        .flatMapLatest { allowed ->
+            if (!allowed) flowOf(emptyList()) else adminRepository.observeVerificationRequests()
+        }
         .catch { error ->
             val fs = generateSequence(error) { it.cause }.filterIsInstance<FirebaseFirestoreException>().firstOrNull()
             if (fs == null && error is CancellationException) throw error
@@ -38,7 +47,10 @@ class AdminViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
-    val adminLogs: StateFlow<List<AdminLog>> = adminRepository.observeAdminLogs()
+    val adminLogs: StateFlow<List<AdminLog>> = _isAdmin
+        .flatMapLatest { allowed ->
+            if (!allowed) flowOf(emptyList()) else adminRepository.observeAdminLogs()
+        }
         .catch { error ->
             val fs = generateSequence(error) { it.cause }.filterIsInstance<FirebaseFirestoreException>().firstOrNull()
             if (fs == null && error is CancellationException) throw error
@@ -56,6 +68,10 @@ class AdminViewModel(
 
     private val _feedback = MutableStateFlow<String?>(null)
     val feedback: StateFlow<String?> = _feedback.asStateFlow()
+
+    fun setAdminAccess(isAdmin: Boolean) {
+        _isAdmin.value = isAdmin
+    }
 
     fun clearFeedback() {
         _feedback.value = null

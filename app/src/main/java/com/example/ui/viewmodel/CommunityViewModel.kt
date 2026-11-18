@@ -78,6 +78,25 @@ class CommunityViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
+    val selectedGroupPendingMembers: StateFlow<List<GroupMember>> = combine(
+        _selectedGroupId,
+        publicGroupsState
+    ) { gid, groupsState ->
+        val group = (groupsState as? UiState.Success)?.data?.firstOrNull { it.id == gid }
+        if (gid != null && group?.ownerId == currentUserId) gid else null
+    }
+        .flatMapLatest { ownedGroupId ->
+            if (ownedGroupId.isNullOrBlank()) flowOf(emptyList())
+            else groupRepository.observeGroupAllMembersForOwner(ownedGroupId)
+        }
+        .map { list -> list.filter { it.status == "PENDING" } }
+        .catch { error ->
+            val fs = generateSequence(error) { it.cause }.filterIsInstance<FirebaseFirestoreException>().firstOrNull()
+            if (fs == null && error is CancellationException) throw error
+            emit(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
     val resourcesState: StateFlow<UiState<List<ResourceItem>>> = resourceRepository.observePublicResources()
         .map<List<ResourceItem>, UiState<List<ResourceItem>>> { UiState.Success(it) }
         .catch { error ->
@@ -143,6 +162,20 @@ class CommunityViewModel(
         viewModelScope.launch {
             val res = groupRepository.leaveGroup(group)
             _feedback.value = if (res.isSuccess) "Vous avez quitté le groupe." else res.exceptionOrNull()?.localizedMessage
+        }
+    }
+
+    fun approveGroupMember(groupId: String, memberUserId: String) {
+        viewModelScope.launch {
+            val res = groupRepository.approveMemberRequest(groupId, memberUserId)
+            _feedback.value = if (res.isSuccess) "Demande d'adhésion approuvée." else res.exceptionOrNull()?.localizedMessage
+        }
+    }
+
+    fun rejectGroupMember(groupId: String, memberUserId: String) {
+        viewModelScope.launch {
+            val res = groupRepository.rejectMemberRequest(groupId, memberUserId)
+            _feedback.value = if (res.isSuccess) "Demande d'adhésion refusée." else res.exceptionOrNull()?.localizedMessage
         }
     }
 

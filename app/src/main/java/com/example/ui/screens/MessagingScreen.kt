@@ -343,12 +343,18 @@ private fun ChatThreadPane(
     var draft by remember { mutableStateOf("") }
     var attName by remember { mutableStateOf("") }
     var attData by remember { mutableStateOf("") }
+    var attachmentError by remember { mutableStateOf<String?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
 
     val docPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val doc = MediaUtils.readDocumentFromUri(context, uri)
-            if (doc != null && !doc.isTooLarge) {
+            if (doc == null) {
+                attachmentError = "Impossible de lire ce fichier."
+            } else if (doc.isTooLarge) {
+                attachmentError = "Fichier trop volumineux (max 280 Ko)."
+            } else {
+                attachmentError = null
                 attName = doc.fileName
                 attData = doc.contentBody
             }
@@ -441,6 +447,15 @@ private fun ChatThreadPane(
                             }
                         }
                     }
+                }
+
+                if (!attachmentError.isNullOrBlank()) {
+                    Text(
+                        text = attachmentError!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
                 }
 
                 if (attName.isNotBlank()) {

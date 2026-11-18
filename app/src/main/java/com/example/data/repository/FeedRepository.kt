@@ -176,11 +176,14 @@ class FeedRepository(
             val batch = db.batch()
             if (existing.exists()) {
                 batch.delete(reactionRef)
-                val nextCount = (post.likesCount - 1L).coerceAtLeast(0L)
-                batch.update(
-                    db.collection("posts").document(post.id),
-                    mapOf("likesCount" to nextCount, "updatedAt" to FieldValue.serverTimestamp())
-                )
+                val postSnap = try { db.collection("posts").document(post.id).get().await() } catch (_: Exception) { null }
+                val currentLikes = postSnap?.getLong("likesCount") ?: post.likesCount
+                if (currentLikes > 0L) {
+                    batch.update(
+                        db.collection("posts").document(post.id),
+                        mapOf("likesCount" to FieldValue.increment(-1L), "updatedAt" to FieldValue.serverTimestamp())
+                    )
+                }
             } else {
                 batch.set(
                     reactionRef,
@@ -193,7 +196,7 @@ class FeedRepository(
                 )
                 batch.update(
                     db.collection("posts").document(post.id),
-                    mapOf("likesCount" to post.likesCount + 1L, "updatedAt" to FieldValue.serverTimestamp())
+                    mapOf("likesCount" to FieldValue.increment(1L), "updatedAt" to FieldValue.serverTimestamp())
                 )
             }
             batch.commit().await()
@@ -212,7 +215,7 @@ class FeedRepository(
             requireUserId()
             db.collection("posts").document(post.id).update(
                 mapOf(
-                    "sharesCount" to post.sharesCount + 1L,
+                    "sharesCount" to FieldValue.increment(1L),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
@@ -256,12 +259,12 @@ class FeedRepository(
             if (targetType == "POST") {
                 batch.update(
                     db.collection("posts").document(targetId),
-                    mapOf("commentsCount" to currentTargetCount + 1L, "updatedAt" to FieldValue.serverTimestamp())
+                    mapOf("commentsCount" to FieldValue.increment(1L), "updatedAt" to FieldValue.serverTimestamp())
                 )
             } else if (targetType == "DEBATE") {
                 batch.update(
                     db.collection("debates").document(targetId),
-                    mapOf("argumentsCount" to currentTargetCount + 1L, "updatedAt" to FieldValue.serverTimestamp())
+                    mapOf("argumentsCount" to FieldValue.increment(1L), "updatedAt" to FieldValue.serverTimestamp())
                 )
             }
             batch.commit().await()

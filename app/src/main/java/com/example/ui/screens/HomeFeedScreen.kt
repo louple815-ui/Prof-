@@ -554,14 +554,28 @@ private fun CreatePostDialog(
     var imageData by remember { mutableStateOf("") }
     var docName by remember { mutableStateOf("") }
     var docType by remember { mutableStateOf("") }
+    var attachmentError by remember { mutableStateOf<String?>(null) }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) imageData = MediaUtils.encodeImageUriToDataUri(context, uri).orEmpty()
+        if (uri != null) {
+            val encoded = MediaUtils.encodeImageUriToDataUri(context, uri)
+            if (encoded == null) {
+                attachmentError = "Impossible de compresser ou lire cette image."
+            } else {
+                attachmentError = null
+                imageData = encoded
+            }
+        }
     }
     val docPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val doc = MediaUtils.readDocumentFromUri(context, uri)
-            if (doc != null) {
+            if (doc == null) {
+                attachmentError = "Impossible de lire ce document."
+            } else if (doc.isTooLarge) {
+                attachmentError = "Document trop volumineux (max 280 Ko)."
+            } else {
+                attachmentError = null
                 docName = doc.fileName
                 docType = doc.mimeType
             }
@@ -606,6 +620,14 @@ private fun CreatePostDialog(
                         Spacer(Modifier.width(4.dp))
                         Text(if (docName.isBlank()) "Document" else docName.take(12))
                     }
+                }
+                if (!attachmentError.isNullOrBlank()) {
+                    Text(
+                        text = attachmentError!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag("create_post_attachment_error")
+                    )
                 }
             }
         },
