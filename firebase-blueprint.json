@@ -1,0 +1,408 @@
+{
+  "entities": {
+    "UserPublicProfile": {
+      "title": "UserPublicProfile",
+      "description": "Public professional directory profile of a teacher or school leader in prof+ (zero PII).",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["ENSEIGNANT", "RESPONSABLE_ETABLISSEMENT", "MODERATEUR", "ADMINISTRATEUR"] },
+        "country": { "type": "string" },
+        "city": { "type": "string" },
+        "region": { "type": "string" },
+        "jobTitle": { "type": "string" },
+        "subject": { "type": "string" },
+        "schoolLevel": { "type": "string" },
+        "establishmentName": { "type": "string" },
+        "establishmentId": { "type": "string" },
+        "bio": { "type": "string" },
+        "photoData": { "type": "string" },
+        "verified": { "type": "boolean" },
+        "suspended": { "type": "boolean" },
+        "discoverable": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "firstName", "lastName", "displayName", "role", "country", "city", "region", "verified", "suspended", "discoverable", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Owner-isolated PII, notification preferences, language, and blocked users.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "notifyComments": { "type": "boolean" },
+        "notifyReplies": { "type": "boolean" },
+        "notifyMentions": { "type": "boolean" },
+        "notifyMessages": { "type": "boolean" },
+        "notifyInvitations": { "type": "boolean" },
+        "notifyAnnouncements": { "type": "boolean" },
+        "notifyGroups": { "type": "boolean" },
+        "blockedUserIds": { "type": "array" },
+        "preferredLanguage": { "type": "string", "enum": ["fr", "en"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "notifyComments", "notifyReplies", "notifyMentions", "notifyMessages", "notifyInvitations", "notifyAnnouncements", "notifyGroups", "blockedUserIds", "preferredLanguage", "createdAt", "updatedAt"]
+    },
+    "Bookmark": {
+      "title": "Bookmark",
+      "description": "User-saved favorite post, resource, or debate.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "targetId": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["POST", "RESOURCE", "DEBATE"] },
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "targetId", "targetType", "title", "createdAt"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "Professional network feed post with optional image or document attachment.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "authorVerified": { "type": "boolean" },
+        "content": { "type": "string" },
+        "category": { "type": "string" },
+        "visibility": { "type": "string", "enum": ["PUBLIC", "GROUP"] },
+        "groupId": { "type": "string" },
+        "imageData": { "type": "string" },
+        "attachmentName": { "type": "string" },
+        "attachmentType": { "type": "string" },
+        "likesCount": { "type": "integer" },
+        "commentsCount": { "type": "integer" },
+        "sharesCount": { "type": "integer" },
+        "status": { "type": "string", "enum": ["ACTIVE", "REMOVED"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "authorName", "authorRole", "authorVerified", "content", "category", "visibility", "likesCount", "commentsCount", "sharesCount", "status", "createdAt", "updatedAt"]
+    },
+    "PostReaction": {
+      "title": "PostReaction",
+      "description": "Per-user reaction on a post.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["LIKE", "INSPIRE", "APPLAUSE"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "userId", "type", "createdAt"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "Comment or reply on a post or debate.",
+      "type": "object",
+      "properties": {
+        "targetId": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["POST", "DEBATE"] },
+        "parentCommentId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "content": { "type": "string" },
+        "visibility": { "type": "string", "enum": ["PUBLIC", "GROUP"] },
+        "status": { "type": "string", "enum": ["ACTIVE", "REMOVED"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["targetId", "targetType", "authorId", "authorName", "authorRole", "content", "visibility", "status", "createdAt", "updatedAt"]
+    },
+    "Debate": {
+      "title": "Debate",
+      "description": "Structured educational debate topic with optional attached poll.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorVerified": { "type": "boolean" },
+        "title": { "type": "string" },
+        "question": { "type": "string" },
+        "category": { "type": "string" },
+        "visibility": { "type": "string", "enum": ["PUBLIC"] },
+        "status": { "type": "string", "enum": ["OPEN", "CLOSED", "REMOVED"] },
+        "argumentsCount": { "type": "integer" },
+        "pollId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "authorName", "authorVerified", "title", "question", "category", "visibility", "status", "argumentsCount", "createdAt", "updatedAt"]
+    },
+    "Poll": {
+      "title": "Poll",
+      "description": "Poll associated with a debate.",
+      "type": "object",
+      "properties": {
+        "debateId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "question": { "type": "string" },
+        "options": { "type": "array" },
+        "optionCounts": { "type": "array" },
+        "totalVotes": { "type": "integer" },
+        "visibility": { "type": "string", "enum": ["PUBLIC"] },
+        "status": { "type": "string", "enum": ["OPEN", "CLOSED"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["debateId", "authorId", "question", "options", "optionCounts", "totalVotes", "visibility", "status", "createdAt", "updatedAt"]
+    },
+    "Vote": {
+      "title": "Vote",
+      "description": "Single vote per user per poll (doc ID = pollId_userId).",
+      "type": "object",
+      "properties": {
+        "pollId": { "type": "string" },
+        "debateId": { "type": "string" },
+        "userId": { "type": "string" },
+        "optionIndex": { "type": "integer" },
+        "visibility": { "type": "string", "enum": ["PUBLIC"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["pollId", "debateId", "userId", "optionIndex", "visibility", "createdAt"]
+    },
+    "Group": {
+      "title": "Group",
+      "description": "Professional teacher group by subject, level, establishment, region, or domain.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "domain": { "type": "string" },
+        "subject": { "type": "string" },
+        "level": { "type": "string" },
+        "region": { "type": "string" },
+        "privacy": { "type": "string", "enum": ["PUBLIC", "PRIVATE", "INVITE_ONLY"] },
+        "rules": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "membersCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "domain", "privacy", "ownerId", "ownerName", "membersCount", "createdAt", "updatedAt"]
+    },
+    "GroupMember": {
+      "title": "GroupMember",
+      "description": "Group membership record (doc ID = groupId_userId).",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "memberRole": { "type": "string", "enum": ["OWNER", "MODERATOR", "MEMBER"] },
+        "status": { "type": "string", "enum": ["ACTIVE", "PENDING", "INVITED"] },
+        "visibility": { "type": "string", "enum": ["PUBLIC", "PRIVATE"] },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "userId", "userName", "userRole", "memberRole", "status", "visibility", "joinedAt"]
+    },
+    "Resource": {
+      "title": "Resource",
+      "description": "Pedagogical resource (PDF, course, exercise, answer key, lesson sheet, training).",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "resourceType": { "type": "string", "enum": ["PDF", "COURS", "EXERCICE", "CORRIGE", "FICHE_PEDAGOGIQUE", "FORMATION"] },
+        "subject": { "type": "string" },
+        "level": { "type": "string" },
+        "fileName": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "fileSizeBytes": { "type": "integer" },
+        "contentBody": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "visibility": { "type": "string", "enum": ["PUBLIC", "GROUP"] },
+        "groupId": { "type": "string" },
+        "downloadsCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "resourceType", "subject", "level", "fileName", "mimeType", "fileSizeBytes", "authorId", "authorName", "visibility", "downloadsCount", "createdAt", "updatedAt"]
+    },
+    "Establishment": {
+      "title": "Establishment",
+      "description": "Official school or educational institution page.",
+      "type": "object",
+      "properties": {
+        "officialName": { "type": "string" },
+        "country": { "type": "string" },
+        "city": { "type": "string" },
+        "region": { "type": "string" },
+        "establishmentType": { "type": "string" },
+        "description": { "type": "string" },
+        "directorId": { "type": "string" },
+        "directorName": { "type": "string" },
+        "announcement": { "type": "string" },
+        "verified": { "type": "boolean" },
+        "visibility": { "type": "string", "enum": ["PUBLIC"] },
+        "membersCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["officialName", "country", "city", "region", "establishmentType", "directorId", "directorName", "verified", "visibility", "membersCount", "createdAt", "updatedAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Direct or group messaging conversation.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["DIRECT", "GROUP"] },
+        "title": { "type": "string" },
+        "participantIds": { "type": "array" },
+        "participantSummary": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "title", "participantIds", "participantSummary", "lastMessage", "lastMessageAt", "createdBy", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Encrypted-in-transit private message isolated to conversation participants.",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string" },
+        "participantIds": { "type": "array" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "attachmentName": { "type": "string" },
+        "attachmentData": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conversationId", "participantIds", "senderId", "senderName", "text", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notification for comments, replies, mentions, messages, invitations, announcements, or groups.",
+      "type": "object",
+      "properties": {
+        "recipientId": { "type": "string" },
+        "actorId": { "type": "string" },
+        "actorName": { "type": "string" },
+        "type": { "type": "string", "enum": ["COMMENT", "REPLY", "MENTION", "MESSAGE", "INVITATION", "ANNOUNCEMENT", "GROUP_ACTIVITY"] },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "targetId": { "type": "string" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["recipientId", "actorId", "actorName", "type", "title", "body", "read", "createdAt"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Moderation report filed by a user.",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string" },
+        "reporterName": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["POST", "COMMENT", "DEBATE", "USER", "MESSAGE", "GROUP", "RESOURCE"] },
+        "targetId": { "type": "string" },
+        "reason": { "type": "string" },
+        "details": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "REVIEWED", "DISMISSED"] },
+        "reviewedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterId", "reporterName", "targetType", "targetId", "reason", "status", "createdAt", "updatedAt"]
+    },
+    "VerificationRequest": {
+      "title": "VerificationRequest",
+      "description": "Teacher or establishment official verification request.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["TEACHER", "ESTABLISHMENT"] },
+        "targetId": { "type": "string" },
+        "targetName": { "type": "string" },
+        "documentInfo": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] },
+        "reviewedBy": { "type": "string" },
+        "reviewNote": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userName", "targetType", "targetId", "targetName", "documentInfo", "status", "createdAt", "updatedAt"]
+    },
+    "AdminLog": {
+      "title": "AdminLog",
+      "description": "Immutable administrative audit log entry.",
+      "type": "object",
+      "properties": {
+        "adminId": { "type": "string" },
+        "adminName": { "type": "string" },
+        "action": { "type": "string" },
+        "targetType": { "type": "string" },
+        "targetId": { "type": "string" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["adminId", "adminName", "action", "targetType", "targetId", "createdAt"]
+    },
+    "RoleGrant": {
+      "title": "RoleGrant",
+      "description": "Server/Admin-only role assignment marker.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "assignedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "assignedBy", "createdAt"]
+    },
+    "AppCategory": {
+      "title": "AppCategory",
+      "description": "Admin-managed debate/subject/level category.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "type": "string", "enum": ["DEBATE", "SUBJECT", "LEVEL"] },
+        "active": { "type": "boolean" },
+        "visibility": { "type": "string", "enum": ["PUBLIC"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "kind", "active", "visibility", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "UserPublicProfile", "description": "Public teacher directory profile" },
+    "/users/{userId}/private/{docId}": { "schema": "UserPrivateInfo", "description": "Owner-isolated PII and preferences" },
+    "/users/{userId}/bookmarks/{bookmarkId}": { "schema": "Bookmark", "description": "User bookmarks" },
+    "/posts/{postId}": { "schema": "Post", "description": "Social feed posts" },
+    "/posts/{postId}/reactions/{userId}": { "schema": "PostReaction", "description": "Post reactions" },
+    "/comments/{commentId}": { "schema": "Comment", "description": "Post and debate comments" },
+    "/debates/{debateId}": { "schema": "Debate", "description": "Professional debates" },
+    "/polls/{pollId}": { "schema": "Poll", "description": "Debate polls" },
+    "/votes/{voteId}": { "schema": "Vote", "description": "Poll votes" },
+    "/groups/{groupId}": { "schema": "Group", "description": "Professional groups" },
+    "/group_members/{memberDocId}": { "schema": "GroupMember", "description": "Group membership records" },
+    "/resources/{resourceId}": { "schema": "Resource", "description": "Pedagogical library resources" },
+    "/establishments/{establishmentId}": { "schema": "Establishment", "description": "Educational establishments" },
+    "/conversations/{conversationId}": { "schema": "Conversation", "description": "Messaging conversations" },
+    "/messages/{messageId}": { "schema": "Message", "description": "Private conversation messages" },
+    "/notifications/{notificationId}": { "schema": "Notification", "description": "User notifications" },
+    "/reports/{reportId}": { "schema": "Report", "description": "Moderation reports" },
+    "/verification_requests/{requestId}": { "schema": "VerificationRequest", "description": "Teacher and school verification requests" },
+    "/admin_logs/{logId}": { "schema": "AdminLog", "description": "Admin audit trail" },
+    "/admins/{userId}": { "schema": "RoleGrant", "description": "Server-controlled admin privileges" },
+    "/moderators/{userId}": { "schema": "RoleGrant", "description": "Server-controlled moderator privileges" },
+    "/app_categories/{categoryId}": { "schema": "AppCategory", "description": "Managed categories" }
+  }
+}

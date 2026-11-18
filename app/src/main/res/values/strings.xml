@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">prof+</string>
+    <string name="slogan">Le réseau professionnel des enseignants</string>
+    <string name="production_signature">ONADJA PRODUCTION</string>
+    <string name="production_presents">Présente</string>
+    <string name="nav_home">Accueil</string>
+    <string name="nav_debates">Débats</string>
+    <string name="nav_groups">Groupes</string>
+    <string name="nav_resources">Ressources</string>
+    <string name="nav_profile">Profil</string>
+    <string name="sign_in_google">Continuer avec Google</string>
+    <string name="sign_out">Déconnexion</string>
+    <string name="error_generic">Une erreur est survenue. Veuillez réessayer.</string>
+</resources>

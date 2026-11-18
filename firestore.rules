@@ -1,0 +1,776 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global Security Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (request.auth.token.email == 'louple815@gmail.com' && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isModerator() {
+      return isAdmin() || (
+        isSignedIn() && exists(/databases/$(database)/documents/moderators/$(request.auth.uid))
+      );
+    }
+
+    function isNotSuspended() {
+      return !exists(/databases/$(database)/documents/users/$(request.auth.uid)) ||
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.suspended == false;
+    }
+
+    function isGroupMember(groupId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/group_members/$(groupId + '_' + request.auth.uid)) &&
+        get(/databases/$(database)/documents/group_members/$(groupId + '_' + request.auth.uid)).data.status == 'ACTIVE';
+    }
+
+    // 3. Entity Validation Helpers
+    function isValidUserPublic(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.firstName is string && data.firstName.size() >= 1 && data.firstName.size() <= 60 &&
+             data.lastName is string && data.lastName.size() >= 1 && data.lastName.size() <= 60 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+             data.role in ['ENSEIGNANT', 'RESPONSABLE_ETABLISSEMENT', 'MODERATEUR', 'ADMINISTRATEUR'] &&
+             data.country is string && data.country.size() >= 1 && data.country.size() <= 80 &&
+             data.city is string && data.city.size() >= 1 && data.city.size() <= 80 &&
+             data.region is string && data.region.size() >= 1 && data.region.size() <= 80 &&
+             (!('jobTitle' in data) || (data.jobTitle is string && data.jobTitle.size() <= 100)) &&
+             (!('subject' in data) || (data.subject is string && data.subject.size() <= 80)) &&
+             (!('schoolLevel' in data) || (data.schoolLevel is string && data.schoolLevel.size() <= 80)) &&
+             (!('establishmentName' in data) || (data.establishmentName is string && data.establishmentName.size() <= 120)) &&
+             (!('establishmentId' in data) || (data.establishmentId is string && data.establishmentId.size() <= 128)) &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 600)) &&
+             (!('photoData' in data) || (data.photoData is string && data.photoData.size() <= 350000)) &&
+             data.verified is bool &&
+             data.suspended is bool &&
+             data.discoverable is bool &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidUserPrivate(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 160)) &&
+             data.notifyComments is bool &&
+             data.notifyReplies is bool &&
+             data.notifyMentions is bool &&
+             data.notifyMessages is bool &&
+             data.notifyInvitations is bool &&
+             data.notifyAnnouncements is bool &&
+             data.notifyGroups is bool &&
+             data.blockedUserIds is list && data.blockedUserIds.size() <= 100 &&
+             (data.blockedUserIds.size() == 0 || data.blockedUserIds[0] is string) &&
+             data.preferredLanguage in ['fr', 'en'] &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidBookmark(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+             data.targetType in ['POST', 'RESOURCE', 'DEBATE'] &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+             (!('subtitle' in data) || (data.subtitle is string && data.subtitle.size() <= 300)) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidPost(data) {
+      return data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120 &&
+             data.authorRole is string && data.authorRole.size() >= 1 && data.authorRole.size() <= 40 &&
+             data.authorVerified is bool &&
+             data.content is string && data.content.size() >= 1 && data.content.size() <= 3000 &&
+             data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
+             data.visibility in ['PUBLIC', 'GROUP'] &&
+             (!('groupId' in data) || (data.groupId is string && data.groupId.size() <= 128)) &&
+             (!('imageData' in data) || (data.imageData is string && data.imageData.size() <= 350000)) &&
+             (!('attachmentName' in data) || (data.attachmentName is string && data.attachmentName.size() <= 160)) &&
+             (!('attachmentType' in data) || (data.attachmentType is string && data.attachmentType.size() <= 40)) &&
+             data.likesCount is int && data.likesCount >= 0 &&
+             data.commentsCount is int && data.commentsCount >= 0 &&
+             data.sharesCount is int && data.sharesCount >= 0 &&
+             data.status in ['ACTIVE', 'REMOVED'] &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidReaction(data) {
+      return data.postId is string && data.postId.size() >= 1 && data.postId.size() <= 128 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.type in ['LIKE', 'INSPIRE', 'APPLAUSE'] &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidComment(data) {
+      return data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+             data.targetType in ['POST', 'DEBATE'] &&
+             (!('parentCommentId' in data) || (data.parentCommentId is string && data.parentCommentId.size() <= 128)) &&
+             data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120 &&
+             data.authorRole is string && data.authorRole.size() >= 1 && data.authorRole.size() <= 40 &&
+             data.content is string && data.content.size() >= 1 && data.content.size() <= 1500 &&
+             data.visibility in ['PUBLIC', 'GROUP'] &&
+             data.status in ['ACTIVE', 'REMOVED'] &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidDebate(data) {
+      return data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120 &&
+             data.authorVerified is bool &&
+             data.title is string && data.title.size() >= 3 && data.title.size() <= 180 &&
+             data.question is string && data.question.size() >= 5 && data.question.size() <= 2000 &&
+             data.category is string && data.category.size() >= 2 && data.category.size() <= 80 &&
+             data.visibility in ['PUBLIC'] &&
+             data.status in ['OPEN', 'CLOSED', 'REMOVED'] &&
+             data.argumentsCount is int && data.argumentsCount >= 0 &&
+             (!('pollId' in data) || (data.pollId is string && data.pollId.size() <= 128)) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidPoll(data) {
+      return data.debateId is string && data.debateId.size() >= 1 && data.debateId.size() <= 128 &&
+             data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.question is string && data.question.size() >= 3 && data.question.size() <= 300 &&
+             data.options is list && data.options.size() >= 2 && data.options.size() <= 6 &&
+             data.options[0] is string &&
+             data.optionCounts is list && data.optionCounts.size() == data.options.size() &&
+             data.optionCounts[0] is int &&
+             data.totalVotes is int && data.totalVotes >= 0 &&
+             data.visibility in ['PUBLIC'] &&
+             data.status in ['OPEN', 'CLOSED'] &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidVote(data) {
+      return data.pollId is string && data.pollId.size() >= 1 && data.pollId.size() <= 128 &&
+             data.debateId is string && data.debateId.size() >= 1 && data.debateId.size() <= 128 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.optionIndex is int && data.optionIndex >= 0 && data.optionIndex < 6 &&
+             data.visibility in ['PUBLIC'] &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidGroup(data) {
+      return data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 600)) &&
+             data.domain is string && data.domain.size() >= 2 && data.domain.size() <= 60 &&
+             (!('subject' in data) || (data.subject is string && data.subject.size() <= 80)) &&
+             (!('level' in data) || (data.level is string && data.level.size() <= 80)) &&
+             (!('region' in data) || (data.region is string && data.region.size() <= 80)) &&
+             data.privacy in ['PUBLIC', 'PRIVATE', 'INVITE_ONLY'] &&
+             (!('rules' in data) || (data.rules is string && data.rules.size() <= 1000)) &&
+             data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 120 &&
+             data.membersCount is int && data.membersCount >= 1 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidGroupMember(data) {
+      return data.groupId is string && data.groupId.size() >= 1 && data.groupId.size() <= 128 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 120 &&
+             data.userRole is string && data.userRole.size() >= 1 && data.userRole.size() <= 40 &&
+             data.memberRole in ['OWNER', 'MODERATOR', 'MEMBER'] &&
+             data.status in ['ACTIVE', 'PENDING', 'INVITED'] &&
+             data.visibility in ['PUBLIC', 'PRIVATE'] &&
+             isValidTimestamp(data.joinedAt);
+    }
+
+    function isValidResource(data) {
+      return data.title is string && data.title.size() >= 2 && data.title.size() <= 160 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 1000)) &&
+             data.resourceType in ['PDF', 'COURS', 'EXERCICE', 'CORRIGE', 'FICHE_PEDAGOGIQUE', 'FORMATION'] &&
+             data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 80 &&
+             data.level is string && data.level.size() >= 1 && data.level.size() <= 80 &&
+             data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 160 &&
+             data.mimeType is string && data.mimeType.size() >= 1 && data.mimeType.size() <= 100 &&
+             data.fileSizeBytes is int && data.fileSizeBytes >= 0 && data.fileSizeBytes <= 5000000 &&
+             (!('contentBody' in data) || (data.contentBody is string && data.contentBody.size() <= 450000)) &&
+             data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120 &&
+             data.visibility in ['PUBLIC', 'GROUP'] &&
+             (!('groupId' in data) || (data.groupId is string && data.groupId.size() <= 128)) &&
+             data.downloadsCount is int && data.downloadsCount >= 0 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidEstablishment(data) {
+      return data.officialName is string && data.officialName.size() >= 2 && data.officialName.size() <= 140 &&
+             data.country is string && data.country.size() >= 1 && data.country.size() <= 80 &&
+             data.city is string && data.city.size() >= 1 && data.city.size() <= 80 &&
+             data.region is string && data.region.size() >= 1 && data.region.size() <= 80 &&
+             data.establishmentType is string && data.establishmentType.size() >= 2 && data.establishmentType.size() <= 80 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 800)) &&
+             data.directorId is string && data.directorId.size() >= 1 && data.directorId.size() <= 128 &&
+             data.directorName is string && data.directorName.size() >= 1 && data.directorName.size() <= 120 &&
+             (!('announcement' in data) || (data.announcement is string && data.announcement.size() <= 600)) &&
+             data.verified is bool &&
+             data.visibility in ['PUBLIC'] &&
+             data.membersCount is int && data.membersCount >= 1 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidConversation(data) {
+      return data.type in ['DIRECT', 'GROUP'] &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.participantIds is list && data.participantIds.size() >= 2 && data.participantIds.size() <= 50 &&
+             data.participantIds[0] is string &&
+             data.participantSummary is string && data.participantSummary.size() <= 400 &&
+             data.lastMessage is string && data.lastMessage.size() <= 500 &&
+             isValidTimestamp(data.lastMessageAt) &&
+             data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidMessage(data) {
+      return data.conversationId is string && data.conversationId.size() >= 1 && data.conversationId.size() <= 128 &&
+             data.participantIds is list && data.participantIds.size() >= 2 && data.participantIds.size() <= 50 &&
+             data.participantIds[0] is string &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 120 &&
+             data.text is string && data.text.size() <= 2000 &&
+             (!('attachmentName' in data) || (data.attachmentName is string && data.attachmentName.size() <= 160)) &&
+             (!('attachmentData' in data) || (data.attachmentData is string && data.attachmentData.size() <= 350000)) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidNotification(data) {
+      return data.recipientId is string && data.recipientId.size() >= 1 && data.recipientId.size() <= 128 &&
+             data.actorId is string && data.actorId.size() >= 1 && data.actorId.size() <= 128 &&
+             data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 120 &&
+             data.type in ['COMMENT', 'REPLY', 'MENTION', 'MESSAGE', 'INVITATION', 'ANNOUNCEMENT', 'GROUP_ACTIVITY'] &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 140 &&
+             data.body is string && data.body.size() >= 1 && data.body.size() <= 400 &&
+             (!('targetId' in data) || (data.targetId is string && data.targetId.size() <= 128)) &&
+             data.read is bool &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidReport(data) {
+      return data.reporterId is string && data.reporterId.size() >= 1 && data.reporterId.size() <= 128 &&
+             data.reporterName is string && data.reporterName.size() >= 1 && data.reporterName.size() <= 120 &&
+             data.targetType in ['POST', 'COMMENT', 'DEBATE', 'USER', 'MESSAGE', 'GROUP', 'RESOURCE'] &&
+             data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+             data.reason is string && data.reason.size() >= 2 && data.reason.size() <= 120 &&
+             (!('details' in data) || (data.details is string && data.details.size() <= 600)) &&
+             data.status in ['PENDING', 'REVIEWED', 'DISMISSED'] &&
+             (!('reviewedBy' in data) || (data.reviewedBy is string && data.reviewedBy.size() <= 128)) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidVerificationRequest(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 120 &&
+             data.targetType in ['TEACHER', 'ESTABLISHMENT'] &&
+             data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+             data.targetName is string && data.targetName.size() >= 1 && data.targetName.size() <= 140 &&
+             data.documentInfo is string && data.documentInfo.size() >= 5 && data.documentInfo.size() <= 600 &&
+             data.status in ['PENDING', 'APPROVED', 'REJECTED'] &&
+             (!('reviewedBy' in data) || (data.reviewedBy is string && data.reviewedBy.size() <= 128)) &&
+             (!('reviewNote' in data) || (data.reviewNote is string && data.reviewNote.size() <= 300)) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidAdminLog(data) {
+      return data.adminId is string && data.adminId.size() >= 1 && data.adminId.size() <= 128 &&
+             data.adminName is string && data.adminName.size() >= 1 && data.adminName.size() <= 120 &&
+             data.action is string && data.action.size() >= 1 && data.action.size() <= 120 &&
+             data.targetType is string && data.targetType.size() >= 1 && data.targetType.size() <= 60 &&
+             data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+             (!('details' in data) || (data.details is string && data.details.size() <= 500)) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidRoleGrant(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.assignedBy is string && data.assignedBy.size() >= 1 && data.assignedBy.size() <= 128 &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidAppCategory(data) {
+      return data.name is string && data.name.size() >= 2 && data.name.size() <= 80 &&
+             data.kind in ['DEBATE', 'SUBJECT', 'LEVEL'] &&
+             data.active is bool &&
+             data.visibility in ['PUBLIC'] &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    // 4. Collection Rules
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (resource.data.discoverable == true || isOwner(userId) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.discoverable == true || resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isOwner(userId) && isValidId(userId) &&
+                       isValidUserPublic(incoming()) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'firstName', 'lastName', 'displayName', 'role', 'country', 'city', 'region', 'verified', 'suspended', 'discoverable', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'firstName', 'lastName', 'displayName', 'role', 'country', 'city', 'region', 'jobTitle', 'subject', 'schoolLevel', 'establishmentName', 'establishmentId', 'bio', 'photoData', 'verified', 'suspended', 'discoverable', 'createdAt', 'updatedAt']) &&
+                       (isAdmin() || (incoming().role in ['ENSEIGNANT', 'RESPONSABLE_ETABLISSEMENT'] && incoming().verified == false && incoming().suspended == false));
+
+      allow update: if isSignedIn() && isValidId(userId) &&
+                       isValidUserPublic(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isAdmin() ||
+                         (isOwner(userId) &&
+                          incoming().role == existing().role &&
+                          incoming().verified == existing().verified &&
+                          incoming().suspended == existing().suspended &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['firstName', 'lastName', 'displayName', 'country', 'city', 'region', 'jobTitle', 'subject', 'schoolLevel', 'establishmentName', 'establishmentId', 'bio', 'photoData', 'discoverable', 'updatedAt']))
+                       );
+
+      allow delete: if isValidId(userId) && (isOwner(userId) || isAdmin());
+
+      match /private/{docId} {
+        allow get, list: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && isValidId(docId) &&
+                         isValidUserPrivate(incoming()) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll(['userId', 'notifyComments', 'notifyReplies', 'notifyMentions', 'notifyMessages', 'notifyInvitations', 'notifyAnnouncements', 'notifyGroups', 'blockedUserIds', 'preferredLanguage', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'email', 'notifyComments', 'notifyReplies', 'notifyMentions', 'notifyMessages', 'notifyInvitations', 'notifyAnnouncements', 'notifyGroups', 'blockedUserIds', 'preferredLanguage', 'createdAt', 'updatedAt']);
+        allow update: if isOwner(userId) && isValidId(docId) &&
+                         isValidUserPrivate(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['email', 'notifyComments', 'notifyReplies', 'notifyMentions', 'notifyMessages', 'notifyInvitations', 'notifyAnnouncements', 'notifyGroups', 'blockedUserIds', 'preferredLanguage', 'updatedAt']);
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+
+      match /bookmarks/{bookmarkId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(bookmarkId) &&
+                         isValidBookmark(incoming()) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll(['userId', 'targetId', 'targetType', 'title', 'createdAt']) &&
+                         incoming().keys().hasOnly(['userId', 'targetId', 'targetType', 'title', 'subtitle', 'createdAt']);
+        allow delete: if isOwner(userId) && isValidId(bookmarkId);
+      }
+    }
+
+    match /posts/{postId} {
+      allow get: if isSignedIn() && isValidId(postId) && (resource.data.visibility == 'PUBLIC' || resource.data.authorId == request.auth.uid || isModerator() || (resource.data.visibility == 'GROUP' && isGroupMember(resource.data.groupId)));
+      allow list: if isSignedIn() && (resource.data.visibility == 'PUBLIC' || resource.data.authorId == request.auth.uid || isModerator());
+
+      allow create: if isSignedIn() && isValidId(postId) &&
+                       isValidPost(incoming()) &&
+                       isNotSuspended() &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().likesCount == 0 &&
+                       incoming().commentsCount == 0 &&
+                       incoming().sharesCount == 0 &&
+                       incoming().status == 'ACTIVE' &&
+                       incoming().keys().hasAll(['authorId', 'authorName', 'authorRole', 'authorVerified', 'content', 'category', 'visibility', 'likesCount', 'commentsCount', 'sharesCount', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['authorId', 'authorName', 'authorRole', 'authorVerified', 'content', 'category', 'visibility', 'groupId', 'imageData', 'attachmentName', 'attachmentType', 'likesCount', 'commentsCount', 'sharesCount', 'status', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() && isValidId(postId) &&
+                       isValidPost(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isModerator() ||
+                         (existing().authorId == request.auth.uid && existing().status == 'ACTIVE' &&
+                          incoming().status == existing().status &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['content', 'category', 'imageData', 'attachmentName', 'attachmentType', 'updatedAt'])) ||
+                         (isNotSuspended() && existing().status == 'ACTIVE' &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'updatedAt']) &&
+                          (incoming().likesCount == existing().likesCount + 1 || incoming().likesCount == existing().likesCount - 1)) ||
+                         (isNotSuspended() && existing().status == 'ACTIVE' &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount', 'updatedAt']) &&
+                          incoming().commentsCount == existing().commentsCount + 1) ||
+                         (isNotSuspended() && existing().status == 'ACTIVE' &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['sharesCount', 'updatedAt']) &&
+                          incoming().sharesCount == existing().sharesCount + 1)
+                       );
+
+      allow delete: if isSignedIn() && isValidId(postId) && (existing().authorId == request.auth.uid || isModerator());
+
+      match /reactions/{userId} {
+        allow get, list: if isSignedIn();
+        allow create: if isOwner(userId) && isValidId(postId) && isValidId(userId) &&
+                         isValidReaction(incoming()) &&
+                         incoming().postId == postId &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['postId', 'userId', 'type', 'createdAt']) &&
+                         incoming().keys().hasOnly(['postId', 'userId', 'type', 'createdAt']);
+        allow delete: if isOwner(userId) && isValidId(postId) && isValidId(userId);
+      }
+    }
+
+    match /comments/{commentId} {
+      allow get: if isSignedIn() && isValidId(commentId) && (resource.data.visibility == 'PUBLIC' || resource.data.authorId == request.auth.uid || isModerator());
+      allow list: if isSignedIn() && (resource.data.visibility == 'PUBLIC' || resource.data.authorId == request.auth.uid || isModerator());
+
+      allow create: if isSignedIn() && isValidId(commentId) &&
+                       isValidComment(incoming()) &&
+                       isNotSuspended() &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().status == 'ACTIVE' &&
+                       incoming().keys().hasAll(['targetId', 'targetType', 'authorId', 'authorName', 'authorRole', 'content', 'visibility', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['targetId', 'targetType', 'parentCommentId', 'authorId', 'authorName', 'authorRole', 'content', 'visibility', 'status', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() && isValidId(commentId) &&
+                       isValidComment(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().targetId == existing().targetId &&
+                       incoming().targetType == existing().targetType &&
+                       incoming().createdAt == existing().createdAt && (
+                         isModerator() ||
+                         (existing().authorId == request.auth.uid && existing().status == 'ACTIVE' &&
+                          incoming().status == existing().status &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['content', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(commentId) && (existing().authorId == request.auth.uid || isModerator());
+    }
+
+    match /debates/{debateId} {
+      allow get: if isSignedIn() && isValidId(debateId) && (resource.data.visibility == 'PUBLIC' || resource.data.authorId == request.auth.uid || isModerator());
+      allow list: if isSignedIn() && (resource.data.visibility == 'PUBLIC' || resource.data.authorId == request.auth.uid || isModerator());
+
+      allow create: if isSignedIn() && isValidId(debateId) &&
+                       isValidDebate(incoming()) &&
+                       isNotSuspended() &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().status == 'OPEN' &&
+                       incoming().argumentsCount == 0 &&
+                       incoming().keys().hasAll(['authorId', 'authorName', 'authorVerified', 'title', 'question', 'category', 'visibility', 'status', 'argumentsCount', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['authorId', 'authorName', 'authorVerified', 'title', 'question', 'category', 'visibility', 'status', 'argumentsCount', 'pollId', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() && isValidId(debateId) &&
+                       isValidDebate(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isModerator() ||
+                         (existing().authorId == request.auth.uid && existing().status == 'OPEN' &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'question', 'category', 'status', 'pollId', 'updatedAt'])) ||
+                         (isNotSuspended() && existing().status == 'OPEN' &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['argumentsCount', 'updatedAt']) &&
+                          incoming().argumentsCount == existing().argumentsCount + 1)
+                       );
+
+      allow delete: if isSignedIn() && isValidId(debateId) && (existing().authorId == request.auth.uid || isModerator());
+    }
+
+    match /polls/{pollId} {
+      allow get: if isSignedIn() && isValidId(pollId) && (resource.data.visibility == 'PUBLIC' || resource.data.authorId == request.auth.uid || isModerator());
+      allow list: if isSignedIn() && (resource.data.visibility == 'PUBLIC' || resource.data.authorId == request.auth.uid || isModerator());
+
+      allow create: if isSignedIn() && isValidId(pollId) &&
+                       isValidPoll(incoming()) &&
+                       isNotSuspended() &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().totalVotes == 0 &&
+                       incoming().status == 'OPEN' &&
+                       incoming().keys().hasAll(['debateId', 'authorId', 'question', 'options', 'optionCounts', 'totalVotes', 'visibility', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['debateId', 'authorId', 'question', 'options', 'optionCounts', 'totalVotes', 'visibility', 'status', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() && isValidId(pollId) &&
+                       isValidPoll(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().debateId == existing().debateId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isModerator() ||
+                         (existing().authorId == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+                         (isNotSuspended() && existing().status == 'OPEN' &&
+                          incoming().totalVotes == existing().totalVotes + 1 &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['optionCounts', 'totalVotes', 'updatedAt']) &&
+                          existsAfter(/databases/$(database)/documents/votes/$(pollId + '_' + request.auth.uid)))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(pollId) && (existing().authorId == request.auth.uid || isModerator());
+    }
+
+    match /votes/{voteId} {
+      allow get: if isSignedIn() && isValidId(voteId) && (resource.data.visibility == 'PUBLIC' || resource.data.userId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.visibility == 'PUBLIC' || resource.data.userId == request.auth.uid);
+
+      allow create: if isSignedIn() && isValidId(voteId) &&
+                       isValidVote(incoming()) &&
+                       isNotSuspended() &&
+                       incoming().userId == request.auth.uid &&
+                       voteId == (incoming().pollId + '_' + request.auth.uid) &&
+                       incoming().keys().hasAll(['pollId', 'debateId', 'userId', 'optionIndex', 'visibility', 'createdAt']) &&
+                       incoming().keys().hasOnly(['pollId', 'debateId', 'userId', 'optionIndex', 'visibility', 'createdAt']);
+    }
+
+    match /groups/{groupId} {
+      allow get: if isSignedIn() && isValidId(groupId) && (resource.data.privacy == 'PUBLIC' || resource.data.ownerId == request.auth.uid || isGroupMember(groupId) || isModerator());
+      allow list: if isSignedIn() && (resource.data.privacy == 'PUBLIC' || resource.data.ownerId == request.auth.uid || isModerator());
+
+      allow create: if isSignedIn() && isValidId(groupId) &&
+                       isValidGroup(incoming()) &&
+                       isNotSuspended() &&
+                       incoming().ownerId == request.auth.uid &&
+                       incoming().membersCount == 1 &&
+                       incoming().keys().hasAll(['name', 'domain', 'privacy', 'ownerId', 'ownerName', 'membersCount', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['name', 'description', 'domain', 'subject', 'level', 'region', 'privacy', 'rules', 'ownerId', 'ownerName', 'membersCount', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() && isValidId(groupId) &&
+                       isValidGroup(incoming()) &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isModerator() ||
+                         (existing().ownerId == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'domain', 'subject', 'level', 'region', 'privacy', 'rules', 'membersCount', 'updatedAt'])) ||
+                         (isNotSuspended() &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['membersCount', 'updatedAt']) &&
+                          (incoming().membersCount == existing().membersCount + 1 || incoming().membersCount == existing().membersCount - 1))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(groupId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /group_members/{memberDocId} {
+      allow get: if isSignedIn() && isValidId(memberDocId) && (resource.data.visibility == 'PUBLIC' || resource.data.userId == request.auth.uid || isModerator());
+      allow list: if isSignedIn() && (resource.data.visibility == 'PUBLIC' || resource.data.userId == request.auth.uid || isModerator());
+
+      allow create: if isSignedIn() && isValidId(memberDocId) &&
+                       isValidGroupMember(incoming()) &&
+                       isNotSuspended() &&
+                       memberDocId == (incoming().groupId + '_' + incoming().userId) && (
+                         (incoming().userId == request.auth.uid && incoming().memberRole == 'MEMBER') ||
+                         (incoming().userId == request.auth.uid && incoming().memberRole == 'OWNER' &&
+                          get(/databases/$(database)/documents/groups/$(incoming().groupId)).data.ownerId == request.auth.uid) ||
+                         (get(/databases/$(database)/documents/groups/$(incoming().groupId)).data.ownerId == request.auth.uid)
+                       ) &&
+                       incoming().keys().hasAll(['groupId', 'userId', 'userName', 'userRole', 'memberRole', 'status', 'visibility', 'joinedAt']) &&
+                       incoming().keys().hasOnly(['groupId', 'userId', 'userName', 'userRole', 'memberRole', 'status', 'visibility', 'joinedAt']);
+
+      allow update: if isSignedIn() && isValidId(memberDocId) &&
+                       isValidGroupMember(incoming()) &&
+                       incoming().groupId == existing().groupId &&
+                       incoming().userId == existing().userId && (
+                         isModerator() ||
+                         get(/databases/$(database)/documents/groups/$(existing().groupId)).data.ownerId == request.auth.uid ||
+                         (existing().userId == request.auth.uid && existing().status == 'INVITED' && incoming().status == 'ACTIVE' &&
+                          incoming().memberRole == existing().memberRole &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(memberDocId) && (
+                       existing().userId == request.auth.uid ||
+                       get(/databases/$(database)/documents/groups/$(existing().groupId)).data.ownerId == request.auth.uid ||
+                       isAdmin()
+                     );
+    }
+
+    match /resources/{resourceId} {
+      allow get: if isSignedIn() && isValidId(resourceId) && (resource.data.visibility == 'PUBLIC' || resource.data.authorId == request.auth.uid || isModerator());
+      allow list: if isSignedIn() && (resource.data.visibility == 'PUBLIC' || resource.data.authorId == request.auth.uid || isModerator());
+
+      allow create: if isSignedIn() && isValidId(resourceId) &&
+                       isValidResource(incoming()) &&
+                       isNotSuspended() &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().downloadsCount == 0 &&
+                       incoming().keys().hasAll(['title', 'resourceType', 'subject', 'level', 'fileName', 'mimeType', 'fileSizeBytes', 'authorId', 'authorName', 'visibility', 'downloadsCount', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['title', 'description', 'resourceType', 'subject', 'level', 'fileName', 'mimeType', 'fileSizeBytes', 'contentBody', 'authorId', 'authorName', 'visibility', 'groupId', 'downloadsCount', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() && isValidId(resourceId) &&
+                       isValidResource(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isModerator() ||
+                         (existing().authorId == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'subject', 'level', 'updatedAt'])) ||
+                         (isNotSuspended() &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['downloadsCount', 'updatedAt']) &&
+                          incoming().downloadsCount == existing().downloadsCount + 1)
+                       );
+
+      allow delete: if isSignedIn() && isValidId(resourceId) && (existing().authorId == request.auth.uid || isModerator());
+    }
+
+    match /establishments/{establishmentId} {
+      allow get: if isSignedIn() && isValidId(establishmentId) && (resource.data.visibility == 'PUBLIC' || resource.data.directorId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.visibility == 'PUBLIC' || resource.data.directorId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() && isValidId(establishmentId) &&
+                       isValidEstablishment(incoming()) &&
+                       isNotSuspended() &&
+                       incoming().directorId == request.auth.uid &&
+                       (isAdmin() || incoming().verified == false) &&
+                       incoming().membersCount == 1 &&
+                       incoming().keys().hasAll(['officialName', 'country', 'city', 'region', 'establishmentType', 'directorId', 'directorName', 'verified', 'visibility', 'membersCount', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['officialName', 'country', 'city', 'region', 'establishmentType', 'description', 'directorId', 'directorName', 'announcement', 'verified', 'visibility', 'membersCount', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() && isValidId(establishmentId) &&
+                       isValidEstablishment(incoming()) &&
+                       incoming().directorId == existing().directorId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isAdmin() ||
+                         (existing().directorId == request.auth.uid &&
+                          incoming().verified == existing().verified &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['officialName', 'country', 'city', 'region', 'establishmentType', 'description', 'announcement', 'membersCount', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(establishmentId) && (existing().directorId == request.auth.uid || isAdmin());
+    }
+
+    match /conversations/{conversationId} {
+      allow get: if isSignedIn() && isValidId(conversationId) && request.auth.uid in resource.data.participantIds;
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participantIds;
+
+      allow create: if isSignedIn() && isValidId(conversationId) &&
+                       isValidConversation(incoming()) &&
+                       isNotSuspended() &&
+                       incoming().createdBy == request.auth.uid &&
+                       request.auth.uid in incoming().participantIds &&
+                       incoming().keys().hasAll(['type', 'title', 'participantIds', 'participantSummary', 'lastMessage', 'lastMessageAt', 'createdBy', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['type', 'title', 'participantIds', 'participantSummary', 'lastMessage', 'lastMessageAt', 'createdBy', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() && isValidId(conversationId) &&
+                       isValidConversation(incoming()) &&
+                       request.auth.uid in existing().participantIds &&
+                       incoming().createdBy == existing().createdBy &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['title', 'participantIds', 'participantSummary', 'lastMessage', 'lastMessageAt', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(conversationId) && existing().createdBy == request.auth.uid;
+    }
+
+    match /messages/{messageId} {
+      allow get: if isSignedIn() && isValidId(messageId) && request.auth.uid in resource.data.participantIds;
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participantIds;
+
+      allow create: if isSignedIn() && isValidId(messageId) &&
+                       isValidMessage(incoming()) &&
+                       isNotSuspended() &&
+                       incoming().senderId == request.auth.uid &&
+                       request.auth.uid in incoming().participantIds &&
+                       exists(/databases/$(database)/documents/conversations/$(incoming().conversationId)) &&
+                       request.auth.uid in get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.participantIds &&
+                       incoming().keys().hasAll(['conversationId', 'participantIds', 'senderId', 'senderName', 'text', 'createdAt']) &&
+                       incoming().keys().hasOnly(['conversationId', 'participantIds', 'senderId', 'senderName', 'text', 'attachmentName', 'attachmentData', 'createdAt']);
+
+      allow delete: if isSignedIn() && isValidId(messageId) && existing().senderId == request.auth.uid;
+    }
+
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && isValidId(notificationId) && resource.data.recipientId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.recipientId == request.auth.uid;
+
+      allow create: if isSignedIn() && isValidId(notificationId) &&
+                       isValidNotification(incoming()) &&
+                       incoming().actorId == request.auth.uid &&
+                       incoming().read == false &&
+                       incoming().keys().hasAll(['recipientId', 'actorId', 'actorName', 'type', 'title', 'body', 'read', 'createdAt']) &&
+                       incoming().keys().hasOnly(['recipientId', 'actorId', 'actorName', 'type', 'title', 'body', 'targetId', 'read', 'createdAt']);
+
+      allow update: if isSignedIn() && isValidId(notificationId) &&
+                       isValidNotification(incoming()) &&
+                       existing().recipientId == request.auth.uid &&
+                       incoming().recipientId == existing().recipientId &&
+                       incoming().actorId == existing().actorId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+
+      allow delete: if isSignedIn() && isValidId(notificationId) && existing().recipientId == request.auth.uid;
+    }
+
+    match /reports/{reportId} {
+      allow get: if isSignedIn() && isValidId(reportId) && (resource.data.reporterId == request.auth.uid || isModerator());
+      allow list: if isSignedIn() && (resource.data.reporterId == request.auth.uid || isModerator());
+
+      allow create: if isSignedIn() && isValidId(reportId) &&
+                       isValidReport(incoming()) &&
+                       incoming().reporterId == request.auth.uid &&
+                       incoming().status == 'PENDING' &&
+                       incoming().keys().hasAll(['reporterId', 'reporterName', 'targetType', 'targetId', 'reason', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['reporterId', 'reporterName', 'targetType', 'targetId', 'reason', 'details', 'status', 'reviewedBy', 'createdAt', 'updatedAt']);
+
+      allow update: if isModerator() && isValidId(reportId) &&
+                       isValidReport(incoming()) &&
+                       incoming().reporterId == existing().reporterId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedBy', 'updatedAt']);
+    }
+
+    match /verification_requests/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() && isValidId(requestId) &&
+                       isValidVerificationRequest(incoming()) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().status == 'PENDING' &&
+                       incoming().keys().hasAll(['userId', 'userName', 'targetType', 'targetId', 'targetName', 'documentInfo', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'userName', 'targetType', 'targetId', 'targetName', 'documentInfo', 'status', 'reviewedBy', 'reviewNote', 'createdAt', 'updatedAt']);
+
+      allow update: if isAdmin() && isValidId(requestId) &&
+                       isValidVerificationRequest(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedBy', 'reviewNote', 'updatedAt']);
+    }
+
+    match /admin_logs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if (isAdmin() || isModerator()) && isValidId(logId) &&
+                       isValidAdminLog(incoming()) &&
+                       incoming().adminId == request.auth.uid &&
+                       incoming().keys().hasAll(['adminId', 'adminName', 'action', 'targetType', 'targetId', 'createdAt']) &&
+                       incoming().keys().hasOnly(['adminId', 'adminName', 'action', 'targetType', 'targetId', 'details', 'createdAt']);
+    }
+
+    match /admins/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin() && isValidId(userId) && (request.resource == null || isValidRoleGrant(incoming()));
+    }
+
+    match /moderators/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin() && isValidId(userId) && (request.resource == null || isValidRoleGrant(incoming()));
+    }
+
+    match /app_categories/{categoryId} {
+      allow get: if isSignedIn() && isValidId(categoryId) && (resource.data.visibility == 'PUBLIC' || isAdmin());
+      allow list: if isSignedIn() && (resource.data.visibility == 'PUBLIC' || isAdmin());
+      allow create, update: if isAdmin() && isValidId(categoryId) && isValidAppCategory(incoming());
+      allow delete: if isAdmin() && isValidId(categoryId);
+    }
+  }
+}
