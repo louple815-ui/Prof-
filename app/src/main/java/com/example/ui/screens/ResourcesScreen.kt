@@ -30,7 +30,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -456,7 +456,7 @@ private fun ResourceDetailPane(
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.MenuBook, contentDescription = null, tint = GoldAccent)
+                            Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, tint = GoldAccent)
                             Spacer(Modifier.width(8.dp))
                             Text(typeLabel, style = MaterialTheme.typography.labelLarge)
                         }

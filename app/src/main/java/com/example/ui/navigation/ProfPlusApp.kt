@@ -17,7 +17,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Badge
@@ -400,7 +400,7 @@ private fun MainAppScaffold(
             PrimaryTabItem(ProfPlusRoutes.ROUTE_HOME, copy.navHome, Icons.Filled.Home, "nav_home"),
             PrimaryTabItem(ProfPlusRoutes.ROUTE_DEBATES, copy.navDebates, Icons.Filled.Forum, "nav_debates"),
             PrimaryTabItem(ProfPlusRoutes.ROUTE_GROUPS, copy.navGroups, Icons.Filled.Groups, "nav_groups"),
-            PrimaryTabItem(ProfPlusRoutes.ROUTE_RESOURCES, copy.navResources, Icons.Filled.MenuBook, "nav_resources"),
+            PrimaryTabItem(ProfPlusRoutes.ROUTE_RESOURCES, copy.navResources, Icons.AutoMirrored.Filled.MenuBook, "nav_resources"),
             PrimaryTabItem(ProfPlusRoutes.ROUTE_PROFILE, copy.navProfile, Icons.Filled.Person, "nav_profile")
         )
     }
