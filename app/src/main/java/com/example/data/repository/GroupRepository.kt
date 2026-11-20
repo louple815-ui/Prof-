@@ -266,7 +266,11 @@ class GroupRepository(
             batch.update(memberRef, mapOf("status" to "ACTIVE"))
             batch.update(
                 groupRef,
-                mapOf("membersCount" to FieldValue.increment(1L), "updatedAt" to FieldValue.serverTimestamp())
+                mapOf(
+                    "membersCount" to FieldValue.increment(1L),
+                    "lastMemberUserId" to memberUserId,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
             )
             batch.commit().await()
             Result.success(Unit)

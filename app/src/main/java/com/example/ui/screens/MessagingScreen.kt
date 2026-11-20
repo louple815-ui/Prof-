@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -55,13 +57,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
 import com.example.core.MediaUtils
 import com.example.core.UiState
 import com.example.data.model.ChatMessage
@@ -246,7 +251,12 @@ fun MessagingScreen(
                                     }
                                     .padding(vertical = 8.dp)
                             ) {
-                                UserAvatar(displayName = target.displayName, verified = target.verified, size = 38.dp)
+                                UserAvatar(
+                                    displayName = target.displayName,
+                                    photoData = target.resolvedPhotoSource(),
+                                    verified = target.verified,
+                                    size = 38.dp
+                                )
                                 Spacer(Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(target.displayName, style = MaterialTheme.typography.titleSmall)
@@ -348,15 +358,15 @@ private fun ChatThreadPane(
 
     val docPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            val doc = MediaUtils.readDocumentFromUri(context, uri)
+            val doc = MediaUtils.inspectUriMeta(context, uri, MediaUtils.MAX_ATTACHMENT_UPLOAD_BYTES)
             if (doc == null) {
                 attachmentError = "Impossible de lire ce fichier."
             } else if (doc.isTooLarge) {
-                attachmentError = "Fichier trop volumineux (max 280 Ko)."
+                attachmentError = "Fichier trop volumineux (max 10 Mo)."
             } else {
                 attachmentError = null
                 attName = doc.fileName
-                attData = doc.contentBody
+                attData = uri.toString()
             }
         }
     }
@@ -439,9 +449,29 @@ private fun ChatThreadPane(
                                     if (msg.text.isNotBlank()) {
                                         Text(msg.text, style = MaterialTheme.typography.bodyMedium)
                                     }
+                                    if (msg.attachmentUrl.startsWith("https://") && msg.attachmentMimeType.startsWith("image/")) {
+                                        Spacer(Modifier.height(6.dp))
+                                        AsyncImage(
+                                            model = msg.attachmentUrl,
+                                            contentDescription = msg.attachmentName.ifBlank { "Image jointe" },
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(160.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                        )
+                                    }
                                     if (msg.attachmentName.isNotBlank()) {
                                         Spacer(Modifier.height(4.dp))
-                                        Text("📎 ${msg.attachmentName}", style = MaterialTheme.typography.labelSmall)
+                                        Text(
+                                            text = "📎 ${msg.attachmentName}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            modifier = if (msg.attachmentUrl.startsWith("https://")) {
+                                                Modifier.clickable {
+                                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(msg.attachmentUrl)))
+                                                }
+                                            } else Modifier
+                                        )
                                     }
                                 }
                             }

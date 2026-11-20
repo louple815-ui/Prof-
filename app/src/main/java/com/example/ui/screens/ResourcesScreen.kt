@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -111,6 +112,7 @@ fun ResourcesScreen(
             level = item.level,
             authorName = item.authorName,
             fileName = item.fileName,
+            fileUrl = item.fileUrl,
             description = item.description,
             contentBody = item.contentBody,
             isOfflineSaved = item.id in offlineIds,
@@ -119,7 +121,7 @@ fun ResourcesScreen(
             onShare = {
                 val share = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, "${item.title} (${item.subject} - ${item.level})\n\n${item.description}\n\n${item.contentBody.take(1000)}")
+                    putExtra(Intent.EXTRA_TEXT, "${item.title} (${item.subject} - ${item.level})\n\n${item.description}\n\n${item.contentBody.ifBlank { item.fileUrl }.take(1000)}")
                 }
                 context.startActivity(Intent.createChooser(share, "Partager la ressource"))
             }
@@ -137,6 +139,7 @@ fun ResourcesScreen(
             level = item.level,
             authorName = item.authorName,
             fileName = item.fileName,
+            fileUrl = "",
             description = item.description,
             contentBody = item.contentBody,
             isOfflineSaved = true,
@@ -310,7 +313,7 @@ fun ResourcesScreen(
     if (showCreateDialog) {
         CreateResourceDialog(
             onDismiss = onDismissCreateDialog,
-            onPublish = { title, desc, type, subject, level, fileName, mime, size, body ->
+            onPublish = { title, desc, type, subject, level, fileName, mime, size, body, fileUri ->
                 communityViewModel.publishResource(
                     profile = currentUser,
                     title = title,
@@ -321,7 +324,8 @@ fun ResourcesScreen(
                     fileName = fileName,
                     mimeType = mime,
                     fileSizeBytes = size,
-                    contentBody = body
+                    contentBody = body,
+                    fileUriString = fileUri
                 )
                 onDismissCreateDialog()
             }
@@ -415,6 +419,7 @@ private fun ResourceDetailPane(
     level: String,
     authorName: String,
     fileName: String,
+    fileUrl: String,
     description: String,
     contentBody: String,
     isOfflineSaved: Boolean,
@@ -422,6 +427,7 @@ private fun ResourceDetailPane(
     onDownloadOffline: () -> Unit,
     onShare: () -> Unit
 ) {
+    val context = LocalContext.current
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.fillMaxSize()
@@ -474,6 +480,18 @@ private fun ResourceDetailPane(
                                 Text("Enregistrer pour usage hors connexion")
                             }
                         }
+                        if (fileUrl.startsWith("https://")) {
+                            OutlinedButton(
+                                onClick = {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(fileUrl)))
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Filled.AttachFile, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Ouvrir le fichier Cloud Storage ($fileName)")
+                            }
+                        }
                     }
                 }
 
@@ -485,7 +503,7 @@ private fun ResourceDetailPane(
                             Text(contentBody, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
-                } else if (contentBody.startsWith("base64:")) {
+                } else if (contentBody.startsWith("base64:") || fileUrl.startsWith("https://")) {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -494,7 +512,7 @@ private fun ResourceDetailPane(
                             Icon(Icons.Filled.AttachFile, contentDescription = null)
                             Spacer(Modifier.width(10.dp))
                             Text(
-                                "Fichier joint stocké ($fileName). Disponible hors connexion dans votre espace local.",
+                                "Fichier joint stocké ($fileName). Disponible via Cloud Storage ou hors connexion.",
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         }
@@ -517,7 +535,8 @@ private fun CreateResourceDialog(
         fileName: String,
         mime: String,
         size: Long,
-        body: String
+        body: String,
+        fileUri: String
     ) -> Unit
 ) {
     val context = LocalContext.current
@@ -530,20 +549,22 @@ private fun CreateResourceDialog(
     var fileName by remember { mutableStateOf("") }
     var mimeType by remember { mutableStateOf("text/plain") }
     var fileSize by remember { mutableStateOf(0L) }
+    var fileUriString by remember { mutableStateOf("") }
     var fileError by remember { mutableStateOf<String?>(null) }
 
     val docPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            val doc = MediaUtils.readDocumentFromUri(context, uri)
+            val doc = MediaUtils.inspectUriMeta(context, uri, MediaUtils.MAX_RESOURCE_UPLOAD_BYTES)
             if (doc == null) {
                 fileError = "Impossible de lire ce document."
             } else if (doc.isTooLarge) {
-                fileError = "Fichier trop volumineux (max 280 Ko)."
+                fileError = "Fichier trop volumineux (max 20 Mo)."
             } else {
                 fileError = null
                 fileName = doc.fileName
                 mimeType = doc.mimeType
                 fileSize = doc.sizeBytes
+                fileUriString = uri.toString()
                 if (doc.contentBody.isNotBlank()) contentBody = doc.contentBody
             }
         }
@@ -582,19 +603,19 @@ private fun CreateResourceDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
-                    value = if (contentBody.startsWith("base64:")) "Document joint ($fileName)" else contentBody,
-                    onValueChange = { if (!it.startsWith("Document joint")) contentBody = it },
-                    label = { Text("Contenu du cours / fiche / exercices") },
+                    value = contentBody,
+                    onValueChange = { contentBody = it },
+                    label = { Text("Contenu texte du cours / fiche / exercices") },
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth().testTag("resource_body_input")
                 )
                 OutlinedButton(
-                    onClick = { docPicker.launch(arrayOf("application/pdf", "text/*")) },
+                    onClick = { docPicker.launch(arrayOf("application/pdf", "text/*", "application/*")) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Filled.AttachFile, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (fileName.isBlank()) "Joindre un fichier (PDF/Texte ≤ 280 Ko)" else fileName)
+                    Text(if (fileName.isBlank()) "Joindre un fichier (PDF/Texte ≤ 20 Mo)" else fileName)
                 }
                 if (!fileError.isNullOrBlank()) {
                     Text(fileError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -615,10 +636,11 @@ private fun CreateResourceDialog(
                         resolvedName,
                         mimeType,
                         if (fileSize > 0) fileSize else resolvedBody.toByteArray().size.toLong(),
-                        resolvedBody
+                        resolvedBody,
+                        fileUriString
                     )
                 },
-                enabled = title.trim().length >= 2 && (description.isNotBlank() || contentBody.isNotBlank()),
+                enabled = title.trim().length >= 2 && (description.isNotBlank() || contentBody.isNotBlank() || fileUriString.isNotBlank()),
                 modifier = Modifier.testTag("resource_publish_btn")
             ) {
                 Text("Publier")

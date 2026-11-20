@@ -55,7 +55,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.core.MediaUtils
 import com.example.data.model.ProfPlusConstants
 import com.example.data.model.UserPublicProfile
 import com.example.ui.auth.DropdownSelector
@@ -105,7 +104,7 @@ fun ProfileScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             UserAvatar(
                                 displayName = currentUser.displayName,
-                                photoData = currentUser.photoData,
+                                photoData = currentUser.resolvedPhotoSource(),
                                 verified = currentUser.verified,
                                 size = 68.dp
                             )
@@ -377,10 +376,10 @@ private fun EditProfileDialog(
     var schoolLevel by remember { mutableStateOf(currentUser.schoolLevel.ifBlank { ProfPlusConstants.SCHOOL_LEVELS[2] }) }
     var establishmentName by remember { mutableStateOf(currentUser.establishmentName) }
     var bio by remember { mutableStateOf(currentUser.bio) }
-    var photoData by remember { mutableStateOf(currentUser.photoData) }
+    var photoData by remember { mutableStateOf(currentUser.resolvedPhotoSource()) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) photoData = MediaUtils.encodeImageUriToDataUri(context, uri).orEmpty()
+        if (uri != null) photoData = uri.toString()
     }
 
     AlertDialog(

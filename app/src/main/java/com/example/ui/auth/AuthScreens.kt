@@ -71,7 +71,6 @@ import androidx.compose.ui.unit.sp
 import androidx.credentials.CredentialManager
 import com.example.R
 import com.example.core.LocalAppCopy
-import com.example.core.MediaUtils
 import com.example.core.attemptAutoSignIn
 import com.example.core.onGoogleSignInClicked
 import com.example.data.model.ProfPlusConstants
@@ -355,7 +354,7 @@ fun CompleteProfileScreen(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            photoData = MediaUtils.encodeImageUriToDataUri(context, uri).orEmpty()
+            photoData = uri.toString()
         }
     }
 

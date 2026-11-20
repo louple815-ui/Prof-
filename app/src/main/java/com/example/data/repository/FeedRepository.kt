@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import android.net.Uri
 import com.example.core.OperationType
 import com.example.core.handleFirestoreError
 import com.example.data.model.Comment
@@ -23,7 +24,8 @@ import kotlinx.coroutines.tasks.await
 
 class FeedRepository(
     private val db: FirebaseFirestore,
-    private val auth: FirebaseAuth = Firebase.auth
+    private val auth: FirebaseAuth = Firebase.auth,
+    private val storageRepository: StorageRepository = StorageRepository()
 ) {
     private fun requireUserId(): String =
         auth.currentUser?.uid ?: throw IllegalStateException("Utilisateur non connecté.")
@@ -97,12 +99,20 @@ class FeedRepository(
         groupId: String = "",
         imageData: String = "",
         attachmentName: String = "",
-        attachmentType: String = ""
+        attachmentType: String = "",
+        attachmentUriString: String = ""
     ): Result<String> {
         val docRef = db.collection("posts").document()
         return try {
             val uid = requireUserId()
             require(content.trim().isNotEmpty()) { "Le contenu de la publication est requis." }
+            val uploadedImage = if (StorageRepository.isLocalUri(imageData)) {
+                storageRepository.uploadPostImage(uid, Uri.parse(imageData))
+            } else null
+            val uploadedAttachment = if (StorageRepository.isLocalUri(attachmentUriString)) {
+                storageRepository.uploadPostAttachment(uid, Uri.parse(attachmentUriString))
+            } else null
+
             val payload = buildMap<String, Any> {
                 put("authorId", uid)
                 put("authorName", authorName.take(120))
@@ -112,9 +122,21 @@ class FeedRepository(
                 put("category", category.take(80))
                 put("visibility", visibility)
                 if (groupId.isNotBlank()) put("groupId", groupId)
-                if (imageData.isNotBlank()) put("imageData", imageData)
-                if (attachmentName.isNotBlank()) put("attachmentName", attachmentName.take(160))
-                if (attachmentType.isNotBlank()) put("attachmentType", attachmentType.take(40))
+                if (uploadedImage != null) {
+                    put("imageUrl", uploadedImage.downloadUrl)
+                    put("imageStoragePath", uploadedImage.storagePath)
+                } else if (StorageRepository.isRemoteHttpsUrl(imageData)) {
+                    put("imageUrl", imageData)
+                }
+                if (uploadedAttachment != null) {
+                    put("attachmentName", uploadedAttachment.fileName.take(160))
+                    put("attachmentType", uploadedAttachment.mimeType.take(40))
+                    put("attachmentUrl", uploadedAttachment.downloadUrl)
+                    put("attachmentStoragePath", uploadedAttachment.storagePath)
+                } else {
+                    if (attachmentName.isNotBlank()) put("attachmentName", attachmentName.take(160))
+                    if (attachmentType.isNotBlank()) put("attachmentType", attachmentType.take(40))
+                }
                 put("likesCount", 0L)
                 put("commentsCount", 0L)
                 put("sharesCount", 0L)
@@ -210,20 +232,21 @@ class FeedRepository(
     }
 
     suspend fun incrementShare(post: Post): Result<Unit> {
-        val path = "posts/${post.id}"
+        val shareRef = db.collection("posts").document(post.id).collection("shares").document()
         return try {
-            requireUserId()
-            db.collection("posts").document(post.id).update(
+            val uid = requireUserId()
+            shareRef.set(
                 mapOf(
-                    "sharesCount" to FieldValue.increment(1L),
-                    "updatedAt" to FieldValue.serverTimestamp()
+                    "postId" to post.id,
+                    "userId" to uid,
+                    "createdAt" to FieldValue.serverTimestamp()
                 )
             ).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.UPDATE, path)
+            handleFirestoreError(e, OperationType.CREATE, shareRef.path)
             Result.failure(e)
         }
     }
@@ -235,7 +258,7 @@ class FeedRepository(
         authorName: String,
         authorRole: String,
         content: String,
-        currentTargetCount: Long
+        currentTargetCount: Long = 0L
     ): Result<Unit> {
         val commentRef = db.collection("comments").document()
         return try {
@@ -254,20 +277,7 @@ class FeedRepository(
                 put("createdAt", FieldValue.serverTimestamp())
                 put("updatedAt", FieldValue.serverTimestamp())
             }
-            val batch = db.batch()
-            batch.set(commentRef, payload)
-            if (targetType == "POST") {
-                batch.update(
-                    db.collection("posts").document(targetId),
-                    mapOf("commentsCount" to FieldValue.increment(1L), "updatedAt" to FieldValue.serverTimestamp())
-                )
-            } else if (targetType == "DEBATE") {
-                batch.update(
-                    db.collection("debates").document(targetId),
-                    mapOf("argumentsCount" to FieldValue.increment(1L), "updatedAt" to FieldValue.serverTimestamp())
-                )
-            }
-            batch.commit().await()
+            commentRef.set(payload).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e

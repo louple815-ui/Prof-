@@ -36,6 +36,8 @@ data class UserPublicProfile(
     val establishmentName: String = "",
     val establishmentId: String = "",
     val bio: String = "",
+    val photoUrl: String = "",
+    val photoStoragePath: String = "",
     val photoData: String = "",
     val verified: Boolean = false,
     val suspended: Boolean = false,
@@ -44,6 +46,7 @@ data class UserPublicProfile(
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
     fun parsedRole(): UserRole = UserRole.fromRaw(role)
+    fun resolvedPhotoSource(): String = photoUrl.ifBlank { photoData }
 }
 
 @Keep
@@ -89,16 +92,22 @@ data class Post(
     val category: String = "Expérience de classe",
     val visibility: String = "PUBLIC",
     val groupId: String = "",
+    val imageUrl: String = "",
+    val imageStoragePath: String = "",
     val imageData: String = "",
     val attachmentName: String = "",
     val attachmentType: String = "",
+    val attachmentUrl: String = "",
+    val attachmentStoragePath: String = "",
     val likesCount: Long = 0L,
     val commentsCount: Long = 0L,
     val sharesCount: Long = 0L,
     val status: String = "ACTIVE",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
-)
+) {
+    fun resolvedImageSource(): String = imageUrl.ifBlank { imageData }
+}
 
 @Keep
 @IgnoreExtraProperties
@@ -218,6 +227,8 @@ data class ResourceItem(
     val fileName: String = "",
     val mimeType: String = "text/plain",
     val fileSizeBytes: Long = 0L,
+    val fileUrl: String = "",
+    val storagePath: String = "",
     val contentBody: String = "",
     val authorId: String = "",
     val authorName: String = "",
@@ -273,6 +284,10 @@ data class ChatMessage(
     val senderName: String = "",
     val text: String = "",
     val attachmentName: String = "",
+    val attachmentUrl: String = "",
+    val attachmentStoragePath: String = "",
+    val attachmentMimeType: String = "",
+    val attachmentSizeBytes: Long = 0L,
     val attachmentData: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null
 )

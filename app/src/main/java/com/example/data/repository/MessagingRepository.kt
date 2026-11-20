@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import android.net.Uri
 import com.example.core.OperationType
 import com.example.core.handleFirestoreError
 import com.example.data.model.ChatMessage
@@ -22,7 +23,8 @@ import kotlinx.coroutines.tasks.await
 
 class MessagingRepository(
     private val db: FirebaseFirestore,
-    private val auth: FirebaseAuth = Firebase.auth
+    private val auth: FirebaseAuth = Firebase.auth,
+    private val storageRepository: StorageRepository = StorageRepository()
 ) {
     private fun requireUserId(): String =
         auth.currentUser?.uid ?: throw IllegalStateException("Utilisateur non connecté.")
@@ -144,18 +146,30 @@ class MessagingRepository(
         val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Non connecté"))
         val msgRef = db.collection("messages").document()
         return try {
-            require(text.isNotBlank() || attachmentName.isNotBlank()) { "Message vide." }
+            require(text.isNotBlank() || attachmentName.isNotBlank() || attachmentData.isNotBlank()) { "Message vide." }
+            val uploaded = if (StorageRepository.isLocalUri(attachmentData)) {
+                storageRepository.uploadMessageAttachment(conversation.id, uid, Uri.parse(attachmentData))
+            } else null
+
+            val resolvedName = uploaded?.fileName ?: attachmentName
             val msgPayload = buildMap<String, Any> {
                 put("conversationId", conversation.id)
                 put("participantIds", conversation.participantIds)
                 put("senderId", uid)
                 put("senderName", senderName.take(120))
                 put("text", text.trim().take(2000))
-                if (attachmentName.isNotBlank()) put("attachmentName", attachmentName.take(160))
-                if (attachmentData.isNotBlank()) put("attachmentData", attachmentData.take(350_000))
+                if (resolvedName.isNotBlank()) put("attachmentName", resolvedName.take(160))
+                if (uploaded != null) {
+                    put("attachmentUrl", uploaded.downloadUrl)
+                    put("attachmentStoragePath", uploaded.storagePath)
+                    put("attachmentMimeType", uploaded.mimeType.take(100))
+                    put("attachmentSizeBytes", uploaded.sizeBytes)
+                } else if (StorageRepository.isRemoteHttpsUrl(attachmentData)) {
+                    put("attachmentUrl", attachmentData)
+                }
                 put("createdAt", FieldValue.serverTimestamp())
             }
-            val preview = if (text.isNotBlank()) text.trim().take(500) else "Pièce jointe : $attachmentName".take(500)
+            val preview = if (text.isNotBlank()) text.trim().take(500) else "Pièce jointe : $resolvedName".take(500)
             val batch = db.batch()
             batch.set(msgRef, msgPayload)
             batch.update(
@@ -166,24 +180,6 @@ class MessagingRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             )
-            // Send in-app notification to recipients
-            conversation.participantIds.filter { it != uid }.take(10).forEach { recipientId ->
-                val notifRef = db.collection("notifications").document()
-                batch.set(
-                    notifRef,
-                    mapOf(
-                        "recipientId" to recipientId,
-                        "actorId" to uid,
-                        "actorName" to senderName.take(120),
-                        "type" to "MESSAGE",
-                        "title" to "Nouveau message de $senderName".take(140),
-                        "body" to preview.take(400),
-                        "targetId" to conversation.id,
-                        "read" to false,
-                        "createdAt" to FieldValue.serverTimestamp()
-                    )
-                )
-            }
             batch.commit().await()
             Result.success(Unit)
         } catch (e: CancellationException) {

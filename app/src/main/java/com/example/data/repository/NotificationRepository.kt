@@ -42,39 +42,7 @@ class NotificationRepository(
         )
     }
 
-    suspend fun createNotification(
-        recipientId: String,
-        actorName: String,
-        type: String,
-        title: String,
-        body: String,
-        targetId: String = ""
-    ): Result<Unit> {
-        val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Non connecté"))
-        if (recipientId.isBlank() || recipientId == uid) return Result.success(Unit)
-        val docRef = db.collection("notifications").document()
-        return try {
-            val payload = buildMap<String, Any> {
-                put("recipientId", recipientId)
-                put("actorId", uid)
-                put("actorName", actorName.take(120))
-                put("type", type)
-                put("title", title.take(140))
-                put("body", body.take(400))
-                if (targetId.isNotBlank()) put("targetId", targetId.take(128))
-                put("read", false)
-                put("createdAt", FieldValue.serverTimestamp())
-            }
-            docRef.set(payload).await()
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.CREATE, docRef.path)
-            Result.failure(e)
-        }
-    }
-
+    // Notification documents are generated exclusively server-side by Cloud Functions triggers.
     suspend fun markAsRead(notificationId: String): Result<Unit> {
         val path = "notifications/$notificationId"
         return try {

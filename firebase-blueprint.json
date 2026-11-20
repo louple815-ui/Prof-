@@ -19,7 +19,8 @@
         "establishmentName": { "type": "string" },
         "establishmentId": { "type": "string" },
         "bio": { "type": "string" },
-        "photoData": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "photoStoragePath": { "type": "string" },
         "verified": { "type": "boolean" },
         "suspended": { "type": "boolean" },
         "discoverable": { "type": "boolean" },
@@ -76,9 +77,12 @@
         "category": { "type": "string" },
         "visibility": { "type": "string", "enum": ["PUBLIC", "GROUP"] },
         "groupId": { "type": "string" },
-        "imageData": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "imageStoragePath": { "type": "string" },
         "attachmentName": { "type": "string" },
         "attachmentType": { "type": "string" },
+        "attachmentUrl": { "type": "string" },
+        "attachmentStoragePath": { "type": "string" },
         "likesCount": { "type": "integer" },
         "commentsCount": { "type": "integer" },
         "sharesCount": { "type": "integer" },
@@ -99,6 +103,17 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["postId", "userId", "type", "createdAt"]
+    },
+    "PostShare": {
+      "title": "PostShare",
+      "description": "Share event recorded on a post to trigger server-side sharesCount increment.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "userId", "createdAt"]
     },
     "Comment": {
       "title": "Comment",
@@ -186,6 +201,7 @@
         "rules": { "type": "string" },
         "ownerId": { "type": "string" },
         "ownerName": { "type": "string" },
+        "lastMemberUserId": { "type": "string" },
         "membersCount": { "type": "integer" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -221,6 +237,8 @@
         "fileName": { "type": "string" },
         "mimeType": { "type": "string" },
         "fileSizeBytes": { "type": "integer" },
+        "fileUrl": { "type": "string" },
+        "storagePath": { "type": "string" },
         "contentBody": { "type": "string" },
         "authorId": { "type": "string" },
         "authorName": { "type": "string" },
@@ -231,6 +249,17 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["title", "resourceType", "subject", "level", "fileName", "mimeType", "fileSizeBytes", "authorId", "authorName", "visibility", "downloadsCount", "createdAt", "updatedAt"]
+    },
+    "ResourceDownload": {
+      "title": "ResourceDownload",
+      "description": "Download event recorded on a resource to trigger server-side downloadsCount increment.",
+      "type": "object",
+      "properties": {
+        "resourceId": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["resourceId", "userId", "createdAt"]
     },
     "Establishment": {
       "title": "Establishment",
@@ -282,7 +311,10 @@
         "senderName": { "type": "string" },
         "text": { "type": "string" },
         "attachmentName": { "type": "string" },
-        "attachmentData": { "type": "string" },
+        "attachmentUrl": { "type": "string" },
+        "attachmentStoragePath": { "type": "string" },
+        "attachmentMimeType": { "type": "string" },
+        "attachmentSizeBytes": { "type": "integer" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["conversationId", "participantIds", "senderId", "senderName", "text", "createdAt"]
@@ -387,6 +419,7 @@
     "/users/{userId}/bookmarks/{bookmarkId}": { "schema": "Bookmark", "description": "User bookmarks" },
     "/posts/{postId}": { "schema": "Post", "description": "Social feed posts" },
     "/posts/{postId}/reactions/{userId}": { "schema": "PostReaction", "description": "Post reactions" },
+    "/posts/{postId}/shares/{shareId}": { "schema": "PostShare", "description": "Post share events" },
     "/comments/{commentId}": { "schema": "Comment", "description": "Post and debate comments" },
     "/debates/{debateId}": { "schema": "Debate", "description": "Professional debates" },
     "/polls/{pollId}": { "schema": "Poll", "description": "Debate polls" },
@@ -394,6 +427,7 @@
     "/groups/{groupId}": { "schema": "Group", "description": "Professional groups" },
     "/group_members/{memberDocId}": { "schema": "GroupMember", "description": "Group membership records" },
     "/resources/{resourceId}": { "schema": "Resource", "description": "Pedagogical library resources" },
+    "/resources/{resourceId}/downloads/{downloadId}": { "schema": "ResourceDownload", "description": "Resource download events" },
     "/establishments/{establishmentId}": { "schema": "Establishment", "description": "Educational establishments" },
     "/conversations/{conversationId}": { "schema": "Conversation", "description": "Messaging conversations" },
     "/messages/{messageId}": { "schema": "Message", "description": "Private conversation messages" },

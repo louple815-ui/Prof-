@@ -1,0 +1,73 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // 1. Default Deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidImageUpload() {
+      return request.resource != null &&
+             request.resource.size <= 5 * 1024 * 1024 &&
+             request.resource.contentType != null &&
+             request.resource.contentType.matches('image/.*');
+    }
+
+    function isValidAttachmentUpload() {
+      return request.resource != null &&
+             request.resource.size <= 10 * 1024 * 1024 &&
+             request.resource.contentType != null &&
+             request.resource.contentType.matches('(application/pdf|text/.*|image/.*|application/msword|application/vnd\\..*)');
+    }
+
+    function isValidResourceUpload() {
+      return request.resource != null &&
+             request.resource.size <= 20 * 1024 * 1024;
+    }
+
+    // 2. User avatars (max 5 MB, image only, owner write/delete)
+    match /avatars/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId) && isValidImageUpload();
+      allow delete: if isOwner(userId);
+    }
+
+    // 3. Post images (max 5 MB, image only) and attachments (max 10 MB)
+    match /posts/{userId}/images/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId) && isValidImageUpload();
+      allow delete: if isOwner(userId);
+    }
+
+    match /posts/{userId}/attachments/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId) && isValidAttachmentUpload();
+      allow delete: if isOwner(userId);
+    }
+
+    // 4. Private message attachments (max 10 MB, participant-scoped read, sender write)
+    match /messages/{conversationId}/{userId}/{fileName} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId ||
+        request.auth.uid in firestore.get(/databases/ai-studio-android-prof-ba263d8f-d3ab-4a71-b325-29ccd86045ee/documents/conversations/$(conversationId)).data.participantIds
+      );
+      allow create, update: if isOwner(userId) && isValidAttachmentUpload();
+      allow delete: if isOwner(userId);
+    }
+
+    // 5. Pedagogical library resources (max 20 MB)
+    match /resources/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId) && isValidResourceUpload();
+      allow delete: if isOwner(userId);
+    }
+  }
+}

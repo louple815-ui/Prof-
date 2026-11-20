@@ -82,6 +82,7 @@ class FeedViewModel(
         imageData: String = "",
         attachmentName: String = "",
         attachmentType: String = "",
+        attachmentUriString: String = "",
         groupId: String = ""
     ) {
         viewModelScope.launch {
@@ -95,7 +96,8 @@ class FeedViewModel(
                 groupId = groupId,
                 imageData = imageData,
                 attachmentName = attachmentName,
-                attachmentType = attachmentType
+                attachmentType = attachmentType,
+                attachmentUriString = attachmentUriString
             )
             _feedback.value = if (res.isSuccess) "Publication ajoutée." else res.exceptionOrNull()?.localizedMessage
         }
@@ -118,16 +120,7 @@ class FeedViewModel(
     fun toggleReaction(post: Post, actorName: String) {
         viewModelScope.launch {
             val res = feedRepository.toggleReaction(post, "LIKE")
-            if (res.isSuccess) {
-                notificationRepository.createNotification(
-                    recipientId = post.authorId,
-                    actorName = actorName,
-                    type = "MENTION",
-                    title = "Réaction à votre publication",
-                    body = "$actorName a aimé votre publication.",
-                    targetId = post.id
-                )
-            } else {
+            if (res.isFailure) {
                 _feedback.value = res.exceptionOrNull()?.localizedMessage
             }
         }
@@ -150,16 +143,7 @@ class FeedViewModel(
                 content = content,
                 currentTargetCount = post.commentsCount
             )
-            if (res.isSuccess) {
-                notificationRepository.createNotification(
-                    recipientId = post.authorId,
-                    actorName = profile.displayName,
-                    type = if (parentCommentId.isBlank()) "COMMENT" else "REPLY",
-                    title = if (parentCommentId.isBlank()) "Nouveau commentaire" else "Nouvelle réponse",
-                    body = "${profile.displayName} : ${content.take(100)}",
-                    targetId = post.id
-                )
-            } else {
+            if (res.isFailure) {
                 _feedback.value = res.exceptionOrNull()?.localizedMessage
             }
         }

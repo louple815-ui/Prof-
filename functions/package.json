@@ -1,0 +1,16 @@
+{
+  "name": "prof-plus-functions",
+  "description": "Cloud Functions for prof+ (ONADJA PRODUCTION) — server-side counters & controlled notifications",
+  "version": "1.0.0",
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test functions.test.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.2.0",
+    "firebase-functions": "^6.3.2"
+  }
+}

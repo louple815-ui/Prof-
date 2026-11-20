@@ -204,7 +204,8 @@ class CommunityViewModel(
         fileName: String,
         mimeType: String,
         fileSizeBytes: Long,
-        contentBody: String
+        contentBody: String,
+        fileUriString: String = ""
     ) {
         viewModelScope.launch {
             val res = resourceRepository.publishResource(
@@ -217,7 +218,8 @@ class CommunityViewModel(
                 fileName = fileName,
                 mimeType = mimeType,
                 fileSizeBytes = fileSizeBytes,
-                contentBody = contentBody
+                contentBody = contentBody,
+                fileUriString = fileUriString
             )
             _feedback.value = if (res.isSuccess) "Ressource pédagogique partagée." else res.exceptionOrNull()?.localizedMessage
         }

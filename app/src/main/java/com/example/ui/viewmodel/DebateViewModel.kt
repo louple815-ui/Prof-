@@ -119,16 +119,7 @@ class DebateViewModel(
                 content = argumentText,
                 currentTargetCount = debate.argumentsCount
             )
-            if (res.isSuccess) {
-                notificationRepository.createNotification(
-                    recipientId = debate.authorId,
-                    actorName = profile.displayName,
-                    type = "REPLY",
-                    title = "Nouvel argument sur votre débat",
-                    body = "${profile.displayName} : ${argumentText.take(100)}",
-                    targetId = debate.id
-                )
-            } else {
+            if (res.isFailure) {
                 _feedback.value = res.exceptionOrNull()?.localizedMessage
             }
         }

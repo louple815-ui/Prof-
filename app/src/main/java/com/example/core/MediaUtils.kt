@@ -17,12 +17,27 @@ data class PickedDocument(
     val isTooLarge: Boolean
 )
 
-object MediaUtils {
-    private const val MAX_IMAGE_DIM = 800
-    private const val MAX_BASE64_CHARS = 300_000
-    private const val MAX_DOC_BYTES = 280_000L
+data class PickedUploadFile(
+    val fileName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val bytes: ByteArray,
+    val textPreview: String,
+    val isTooLarge: Boolean
+)
 
-    fun encodeImageUriToDataUri(context: Context, uri: Uri): String? {
+object MediaUtils {
+    private const val MAX_IMAGE_DIM = 1280
+    const val MAX_IMAGE_UPLOAD_BYTES = 5_000_000L
+    const val MAX_ATTACHMENT_UPLOAD_BYTES = 10_000_000L
+    const val MAX_RESOURCE_UPLOAD_BYTES = 20_000_000L
+    private const val MAX_TEXT_PREVIEW_CHARS = 50_000
+
+    fun prepareImageBytes(
+        context: Context,
+        uri: Uri,
+        maxBytes: Long = MAX_IMAGE_UPLOAD_BYTES
+    ): ByteArray? {
         return try {
             val inputStream = context.contentResolver.openInputStream(uri) ?: return null
             val original = inputStream.use { BitmapFactory.decodeStream(it) } ?: return null
@@ -37,33 +52,26 @@ object MediaUtils {
             } else {
                 original
             }
-            var quality = 78
-            var encoded: String
+            var quality = 85
+            var compressed: ByteArray
             do {
                 val out = ByteArrayOutputStream()
                 resized.compress(Bitmap.CompressFormat.JPEG, quality, out)
-                encoded = "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                compressed = out.toByteArray()
                 quality -= 12
-            } while (encoded.length > MAX_BASE64_CHARS && quality >= 30)
+            } while (compressed.size.toLong() > maxBytes && quality >= 35)
 
-            if (encoded.length > MAX_BASE64_CHARS) null else encoded
+            if (compressed.size.toLong() > maxBytes) null else compressed
         } catch (_: Exception) {
             null
         }
     }
 
-    fun decodeDataUriToBitmap(dataUri: String?): Bitmap? {
-        if (dataUri.isNullOrBlank()) return null
-        return try {
-            val base64Part = dataUri.substringAfter("base64,", dataUri)
-            val bytes = Base64.decode(base64Part, Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    fun readDocumentFromUri(context: Context, uri: Uri): PickedDocument? {
+    fun inspectUriMeta(
+        context: Context,
+        uri: Uri,
+        maxBytes: Long = MAX_ATTACHMENT_UPLOAD_BYTES
+    ): PickedDocument? {
         return try {
             val resolver = context.contentResolver
             var name = "document_pedagogique"
@@ -73,11 +81,11 @@ object MediaUtils {
                 val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
                 if (cursor.moveToFirst()) {
                     if (nameIndex >= 0) name = cursor.getString(nameIndex) ?: name
-                    if (sizeIndex >= 0) size = cursor.getLong(sizeIndex)
+                    if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
                 }
             }
             val mimeType = resolver.getType(uri) ?: "application/octet-stream"
-            if (size > MAX_DOC_BYTES) {
+            if (size > maxBytes) {
                 return PickedDocument(
                     fileName = name,
                     mimeType = mimeType,
@@ -86,23 +94,92 @@ object MediaUtils {
                     isTooLarge = true
                 )
             }
-            val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
-            val actualSize = if (size > 0) size else bytes.size.toLong()
-            if (actualSize > MAX_DOC_BYTES) {
+            val actualSize = if (size > 0L) {
+                size
+            } else {
+                resolver.openInputStream(uri)?.use { stream ->
+                    var total = 0L
+                    val buf = ByteArray(8192)
+                    while (true) {
+                        val read = stream.read(buf)
+                        if (read <= 0) break
+                        total += read
+                        if (total > maxBytes) break
+                    }
+                    total
+                } ?: 0L
+            }
+            if (actualSize > maxBytes) {
                 return PickedDocument(name, mimeType, actualSize, "", true)
             }
-            val body = if (mimeType.startsWith("text/")) {
-                bytes.toString(Charsets.UTF_8)
+            val textBody = if (mimeType.startsWith("text/") && actualSize <= 512_000L) {
+                resolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8).take(MAX_TEXT_PREVIEW_CHARS) }.orEmpty()
             } else {
-                "base64:" + Base64.encodeToString(bytes, Base64.NO_WRAP)
+                ""
             }
             PickedDocument(
                 fileName = name,
                 mimeType = mimeType,
                 sizeBytes = actualSize,
-                contentBody = body.take(400_000),
+                contentBody = textBody,
                 isTooLarge = false
             )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun readUploadableFile(
+        context: Context,
+        uri: Uri,
+        maxBytes: Long = MAX_ATTACHMENT_UPLOAD_BYTES
+    ): PickedUploadFile? {
+        return try {
+            val resolver = context.contentResolver
+            var name = "document_pedagogique"
+            var size = 0L
+            resolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (cursor.moveToFirst()) {
+                    if (nameIndex >= 0) name = cursor.getString(nameIndex) ?: name
+                    if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+                }
+            }
+            val mimeType = resolver.getType(uri) ?: "application/octet-stream"
+            if (size > maxBytes) {
+                return PickedUploadFile(name, mimeType, size, ByteArray(0), "", true)
+            }
+            val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+            val actualSize = if (size > 0L) size else bytes.size.toLong()
+            if (actualSize > maxBytes || bytes.size.toLong() > maxBytes) {
+                return PickedUploadFile(name, mimeType, actualSize, ByteArray(0), "", true)
+            }
+            val textPreview = if (mimeType.startsWith("text/")) {
+                bytes.toString(Charsets.UTF_8).take(MAX_TEXT_PREVIEW_CHARS)
+            } else {
+                ""
+            }
+            PickedUploadFile(
+                fileName = name,
+                mimeType = mimeType,
+                sizeBytes = actualSize,
+                bytes = bytes,
+                textPreview = textPreview,
+                isTooLarge = false
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Read-only fallback decoder for any legacy Base64 data URIs stored prior to Cloud Storage migration. */
+    fun decodeDataUriToBitmap(dataUri: String?): Bitmap? {
+        if (dataUri.isNullOrBlank() || dataUri.startsWith("http://") || dataUri.startsWith("https://")) return null
+        return try {
+            val base64Part = dataUri.substringAfter("base64,", dataUri)
+            val bytes = Base64.decode(base64Part, Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         } catch (_: Exception) {
             null
         }

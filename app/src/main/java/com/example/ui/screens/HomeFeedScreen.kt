@@ -1,10 +1,12 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,6 +71,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
 import com.example.core.MediaUtils
 import com.example.core.UiState
 import com.example.data.model.Bookmark
@@ -248,8 +251,8 @@ fun HomeFeedScreen(
     if (showCreateDialog) {
         CreatePostDialog(
             onDismiss = onDismissCreateDialog,
-            onPublish = { content, category, imageData, docName, docType ->
-                feedViewModel.createPost(currentUser, content, category, imageData, docName, docType)
+            onPublish = { content, category, imageUri, docName, docType, docUri ->
+                feedViewModel.createPost(currentUser, content, category, imageUri, docName, docType, docUri)
                 onDismissCreateDialog()
             }
         )
@@ -307,8 +310,18 @@ fun PostCard(
     onDelete: () -> Unit,
     onReport: () -> Unit
 ) {
+    val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
-    val imageBitmap = remember(post.imageData) { MediaUtils.decodeDataUriToBitmap(post.imageData) }
+    val imageSource = post.resolvedImageSource()
+    val isRemoteOrUri = remember(imageSource) {
+        imageSource.startsWith("http://") ||
+            imageSource.startsWith("https://") ||
+            imageSource.startsWith("content://") ||
+            imageSource.startsWith("file://")
+    }
+    val imageBitmap = remember(imageSource, isRemoteOrUri) {
+        if (isRemoteOrUri) null else MediaUtils.decodeDataUriToBitmap(imageSource)
+    }
 
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -372,7 +385,18 @@ fun PostCard(
             Spacer(modifier = Modifier.height(10.dp))
             Text(post.content, style = MaterialTheme.typography.bodyLarge)
 
-            if (imageBitmap != null) {
+            if (isRemoteOrUri) {
+                Spacer(modifier = Modifier.height(12.dp))
+                AsyncImage(
+                    model = imageSource,
+                    contentDescription = "Image de la publication",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(210.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                )
+            } else if (imageBitmap != null) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Image(
                     bitmap = imageBitmap.asImageBitmap(),
@@ -390,7 +414,15 @@ fun PostCard(
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .let { mod ->
+                            if (post.attachmentUrl.startsWith("https://")) {
+                                mod.clickable {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(post.attachmentUrl)))
+                                }
+                            } else mod
+                        }
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -546,38 +578,47 @@ fun CommentsSheetContent(
 @Composable
 private fun CreatePostDialog(
     onDismiss: () -> Unit,
-    onPublish: (content: String, category: String, imageData: String, docName: String, docType: String) -> Unit
+    onPublish: (
+        content: String,
+        category: String,
+        imageUri: String,
+        docName: String,
+        docType: String,
+        docUri: String
+    ) -> Unit
 ) {
     val context = LocalContext.current
     var content by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(ProfPlusConstants.POST_CATEGORIES.first()) }
-    var imageData by remember { mutableStateOf("") }
+    var imageUriString by remember { mutableStateOf("") }
     var docName by remember { mutableStateOf("") }
     var docType by remember { mutableStateOf("") }
+    var docUriString by remember { mutableStateOf("") }
     var attachmentError by remember { mutableStateOf<String?>(null) }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
-            val encoded = MediaUtils.encodeImageUriToDataUri(context, uri)
-            if (encoded == null) {
-                attachmentError = "Impossible de compresser ou lire cette image."
+            val meta = MediaUtils.inspectUriMeta(context, uri, MediaUtils.MAX_IMAGE_UPLOAD_BYTES)
+            if (meta == null) {
+                attachmentError = "Impossible de lire cette image."
             } else {
                 attachmentError = null
-                imageData = encoded
+                imageUriString = uri.toString()
             }
         }
     }
     val docPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            val doc = MediaUtils.readDocumentFromUri(context, uri)
+            val doc = MediaUtils.inspectUriMeta(context, uri, MediaUtils.MAX_ATTACHMENT_UPLOAD_BYTES)
             if (doc == null) {
                 attachmentError = "Impossible de lire ce document."
             } else if (doc.isTooLarge) {
-                attachmentError = "Document trop volumineux (max 280 Ko)."
+                attachmentError = "Document trop volumineux (max 10 Mo)."
             } else {
                 attachmentError = null
                 docName = doc.fileName
                 docType = doc.mimeType
+                docUriString = uri.toString()
             }
         }
     }
@@ -611,7 +652,7 @@ private fun CreatePostDialog(
                     ) {
                         Icon(Icons.Filled.Image, null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(if (imageData.isBlank()) "Image" else "Image prête")
+                        Text(if (imageUriString.isBlank()) "Image" else "Image prête")
                     }
                     OutlinedButton(
                         onClick = { docPicker.launch(arrayOf("application/pdf", "text/*")) }
@@ -633,7 +674,11 @@ private fun CreatePostDialog(
         },
         confirmButton = {
             Button(
-                onClick = { if (content.isNotBlank()) onPublish(content, category, imageData, docName, docType) },
+                onClick = {
+                    if (content.isNotBlank()) {
+                        onPublish(content, category, imageUriString, docName, docType, docUriString)
+                    }
+                },
                 enabled = content.isNotBlank(),
                 modifier = Modifier.testTag("publish_post_confirm_btn")
             ) {

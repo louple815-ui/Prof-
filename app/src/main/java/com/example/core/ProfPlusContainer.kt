@@ -12,6 +12,7 @@ import com.example.data.repository.GroupRepository
 import com.example.data.repository.MessagingRepository
 import com.example.data.repository.NotificationRepository
 import com.example.data.repository.ResourceRepository
+import com.example.data.repository.StorageRepository
 import com.example.data.repository.UserRepository
 import com.google.firebase.firestore.FirebaseFirestore
 
@@ -22,13 +23,14 @@ class ProfPlusContainer(context: Context) {
     val roomDb: ProfPlusDatabase = ProfPlusDatabase.getInstance(appContext)
     val preferencesManager = PreferencesManager(appContext)
     val networkMonitor = NetworkMonitor(appContext)
+    val storageRepository = StorageRepository(appContext)
 
-    val userRepository = UserRepository(firestore)
-    val feedRepository = FeedRepository(firestore)
+    val userRepository = UserRepository(firestore, storageRepository = storageRepository)
+    val feedRepository = FeedRepository(firestore, storageRepository = storageRepository)
     val debateRepository = DebateRepository(firestore)
     val groupRepository = GroupRepository(firestore)
-    val resourceRepository = ResourceRepository(firestore, roomDb.downloadedResourceDao())
-    val messagingRepository = MessagingRepository(firestore)
+    val resourceRepository = ResourceRepository(firestore, roomDb.downloadedResourceDao(), storageRepository = storageRepository)
+    val messagingRepository = MessagingRepository(firestore, storageRepository = storageRepository)
     val establishmentRepository = EstablishmentRepository(firestore)
     val notificationRepository = NotificationRepository(firestore)
     val adminRepository = AdminRepository(firestore)

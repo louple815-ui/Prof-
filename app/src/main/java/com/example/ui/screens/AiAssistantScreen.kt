@@ -228,11 +228,21 @@ fun AiAssistantScreen(
                 ) {
                     OutlinedTextField(
                         value = promptText,
-                        onValueChange = { promptText = it },
+                        onValueChange = { next ->
+                            if (next.length <= com.example.data.repository.AiAssistantRepository.MAX_PROMPT_CHARS) {
+                                promptText = next
+                            }
+                        },
                         placeholder = {
                             Text(
                                 if (copy.lang == "en") "Describe your lesson, concept, or question..."
                                 else "Décrivez votre cours, notion ou question..."
+                            )
+                        },
+                        supportingText = {
+                            Text(
+                                "${promptText.length} / ${com.example.data.repository.AiAssistantRepository.MAX_PROMPT_CHARS}",
+                                style = MaterialTheme.typography.labelSmall
                             )
                         },
                         maxLines = 4,

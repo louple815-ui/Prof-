@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.R
 import com.example.core.MediaUtils
 import com.example.data.model.UserRole
@@ -98,8 +99,14 @@ fun UserAvatar(
     size: Dp = 44.dp,
     modifier: Modifier = Modifier
 ) {
-    val bitmap: Bitmap? = remember(photoData) {
-        MediaUtils.decodeDataUriToBitmap(photoData)
+    val isUriOrUrl = remember(photoData) {
+        photoData.startsWith("http://") ||
+            photoData.startsWith("https://") ||
+            photoData.startsWith("content://") ||
+            photoData.startsWith("file://")
+    }
+    val bitmap: Bitmap? = remember(photoData, isUriOrUrl) {
+        if (isUriOrUrl) null else MediaUtils.decodeDataUriToBitmap(photoData)
     }
     val initials = remember(displayName) {
         displayName.trim()
@@ -110,7 +117,17 @@ fun UserAvatar(
             .ifBlank { "P+" }
     }
     Box(modifier = modifier.size(size)) {
-        if (bitmap != null) {
+        if (isUriOrUrl) {
+            AsyncImage(
+                model = photoData,
+                contentDescription = displayName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(size)
+                    .clip(CircleShape)
+                    .border(1.5.dp, GoldAccent.copy(alpha = 0.7f), CircleShape)
+            )
+        } else if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = displayName,

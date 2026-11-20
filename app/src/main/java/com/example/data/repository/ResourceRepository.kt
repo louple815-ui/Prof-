@@ -1,5 +1,7 @@
 package com.example.data.repository
 
+import android.net.Uri
+import com.example.core.MediaUtils
 import com.example.core.OperationType
 import com.example.core.handleFirestoreError
 import com.example.data.local.DownloadedResourceDao
@@ -24,7 +26,8 @@ import kotlinx.coroutines.tasks.await
 class ResourceRepository(
     private val db: FirebaseFirestore,
     private val downloadedDao: DownloadedResourceDao,
-    private val auth: FirebaseAuth = Firebase.auth
+    private val auth: FirebaseAuth = Firebase.auth,
+    private val storageRepository: StorageRepository = StorageRepository()
 ) {
     private fun requireUserId(): String =
         auth.currentUser?.uid ?: throw IllegalStateException("Utilisateur non connecté.")
@@ -61,23 +64,43 @@ class ResourceRepository(
         fileName: String,
         mimeType: String,
         fileSizeBytes: Long,
-        contentBody: String
+        contentBody: String,
+        fileUriString: String = ""
     ): Result<Unit> {
         val docRef = db.collection("resources").document()
         return try {
             val uid = requireUserId()
             require(title.trim().length >= 2) { "Titre requis." }
-            require(fileSizeBytes <= 5_000_000L) { "Fichier trop volumineux (max 5 Mo)." }
+            require(fileSizeBytes <= MediaUtils.MAX_RESOURCE_UPLOAD_BYTES) {
+                "Fichier trop volumineux (max 20 Mo)."
+            }
+            val uploaded = if (StorageRepository.isLocalUri(fileUriString)) {
+                storageRepository.uploadResourceFile(uid, Uri.parse(fileUriString))
+            } else null
+
+            val safeTextBody = if (contentBody.startsWith("base64:") || contentBody.startsWith("data:")) {
+                ""
+            } else {
+                contentBody.take(50_000)
+            }
+            val resolvedFileName = uploaded?.fileName ?: fileName
+            val resolvedMime = uploaded?.mimeType ?: mimeType
+            val resolvedSize = uploaded?.sizeBytes ?: fileSizeBytes
+
             val payload = buildMap<String, Any> {
                 put("title", title.trim().take(160))
                 if (description.isNotBlank()) put("description", description.trim().take(1000))
                 put("resourceType", resourceType)
                 put("subject", subject.take(80))
                 put("level", level.take(80))
-                put("fileName", fileName.take(160))
-                put("mimeType", mimeType.take(100))
-                put("fileSizeBytes", fileSizeBytes)
-                if (contentBody.isNotBlank()) put("contentBody", contentBody.take(450_000))
+                put("fileName", resolvedFileName.take(160))
+                put("mimeType", resolvedMime.take(100))
+                put("fileSizeBytes", resolvedSize)
+                if (uploaded != null) {
+                    put("fileUrl", uploaded.downloadUrl)
+                    put("storagePath", uploaded.storagePath)
+                }
+                if (safeTextBody.isNotBlank()) put("contentBody", safeTextBody)
                 put("authorId", uid)
                 put("authorName", authorName.take(120))
                 put("visibility", "PUBLIC")
@@ -97,6 +120,26 @@ class ResourceRepository(
 
     suspend fun downloadForOffline(resource: ResourceItem): Result<DownloadedResourceEntity> {
         return try {
+            val fetchedText = if (
+                resource.contentBody.isBlank() &&
+                resource.fileUrl.isNotBlank() &&
+                resource.mimeType.startsWith("text/")
+            ) {
+                storageRepository.downloadTextPreview(resource.fileUrl).orEmpty()
+            } else {
+                ""
+            }
+            val bodyForOffline = resource.contentBody
+                .ifBlank { fetchedText }
+                .ifBlank {
+                    buildString {
+                        append(resource.description)
+                        if (resource.fileUrl.isNotBlank()) {
+                            if (isNotEmpty()) append("\n\n")
+                            append("Lien Cloud Storage : ${resource.fileUrl}")
+                        }
+                    }
+                }
             val entity = DownloadedResourceEntity(
                 resourceId = resource.id,
                 title = resource.title,
@@ -107,19 +150,25 @@ class ResourceRepository(
                 fileName = resource.fileName,
                 mimeType = resource.mimeType,
                 fileSizeBytes = resource.fileSizeBytes,
-                contentBody = resource.contentBody.ifBlank { resource.description },
+                contentBody = bodyForOffline,
                 authorName = resource.authorName
             )
             downloadedDao.upsert(entity)
-            // Best-effort increment of downloadsCount if online & signed in
+
+            // Record download event document (Cloud Functions updates resources.downloadsCount server-side)
             try {
-                if (auth.currentUser != null && resource.id.isNotBlank()) {
-                    db.collection("resources").document(resource.id).update(
-                        mapOf(
-                            "downloadsCount" to FieldValue.increment(1L),
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        )
-                    ).await()
+                val uid = auth.currentUser?.uid
+                if (uid != null && resource.id.isNotBlank()) {
+                    db.collection("resources").document(resource.id)
+                        .collection("downloads")
+                        .document()
+                        .set(
+                            mapOf(
+                                "resourceId" to resource.id,
+                                "userId" to uid,
+                                "createdAt" to FieldValue.serverTimestamp()
+                            )
+                        ).await()
                 }
             } catch (_: Exception) {
             }

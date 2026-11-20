@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import android.net.Uri
 import com.example.core.OperationType
 import com.example.core.handleFirestoreError
 import com.example.data.model.Bookmark
@@ -25,7 +26,8 @@ import kotlinx.coroutines.tasks.await
 
 class UserRepository(
     private val db: FirebaseFirestore,
-    private val auth: FirebaseAuth = Firebase.auth
+    private val auth: FirebaseAuth = Firebase.auth,
+    private val storageRepository: StorageRepository = StorageRepository()
 ) {
     private fun requireUserId(): String =
         auth.currentUser?.uid ?: throw IllegalStateException("Authentification Google requise.")
@@ -147,6 +149,10 @@ class UserRepository(
             } else {
                 UserRole.ENSEIGNANT.name
             }
+            val uploadedPhoto = when {
+                StorageRepository.isLocalUri(photoData) -> storageRepository.uploadProfilePhoto(uid, Uri.parse(photoData))
+                else -> null
+            }
             val displayName = "${firstName.trim()} ${lastName.trim()}".trim()
             val publicPayload = buildMap<String, Any> {
                 put("userId", uid)
@@ -162,7 +168,12 @@ class UserRepository(
                 if (schoolLevel.isNotBlank()) put("schoolLevel", schoolLevel.trim().take(80))
                 if (establishmentName.isNotBlank()) put("establishmentName", establishmentName.trim().take(120))
                 if (bio.isNotBlank()) put("bio", bio.trim().take(600))
-                if (photoData.isNotBlank()) put("photoData", photoData)
+                if (uploadedPhoto != null) {
+                    put("photoUrl", uploadedPhoto.downloadUrl)
+                    put("photoStoragePath", uploadedPhoto.storagePath)
+                } else if (StorageRepository.isRemoteHttpsUrl(photoData)) {
+                    put("photoUrl", photoData)
+                }
                 put("verified", false)
                 put("suspended", false)
                 put("discoverable", true)
@@ -214,6 +225,10 @@ class UserRepository(
         val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Non connecté"))
         val path = "users/$uid"
         return try {
+            val uploadedPhoto = when {
+                StorageRepository.isLocalUri(photoData) -> storageRepository.uploadProfilePhoto(uid, Uri.parse(photoData))
+                else -> null
+            }
             val displayName = "${firstName.trim()} ${lastName.trim()}".trim()
             val updates = buildMap<String, Any> {
                 put("firstName", firstName.trim().take(60))
@@ -227,7 +242,12 @@ class UserRepository(
                 put("schoolLevel", schoolLevel.trim().take(80))
                 put("establishmentName", establishmentName.trim().take(120))
                 put("bio", bio.trim().take(600))
-                if (photoData.isNotBlank()) put("photoData", photoData)
+                if (uploadedPhoto != null) {
+                    put("photoUrl", uploadedPhoto.downloadUrl)
+                    put("photoStoragePath", uploadedPhoto.storagePath)
+                } else if (StorageRepository.isRemoteHttpsUrl(photoData)) {
+                    put("photoUrl", photoData)
+                }
                 put("updatedAt", FieldValue.serverTimestamp())
             }
             db.collection("users").document(uid).update(updates).await()

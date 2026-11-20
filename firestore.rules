@@ -31,10 +31,27 @@ service cloud.firestore {
       return ts is timestamp && ts <= request.time;
     }
 
+    function isValidHttpUrl(url) {
+      return url is string &&
+             url.size() <= 2048 &&
+             (url == '' || url.matches('^https://.*')) &&
+             !url.matches('^data:.*') &&
+             !url.matches('^base64:.*');
+    }
+
+    function isValidStoragePath(path) {
+      return path is string &&
+             path.size() <= 300 &&
+             !path.matches('.*\\.\\..*');
+    }
+
     function isAdmin() {
       return isSignedIn() && (
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
-        (request.auth.token.email == 'louple815@gmail.com' && request.auth.token.email_verified == true)
+        ('email' in request.auth.token &&
+         'email_verified' in request.auth.token &&
+         request.auth.token.email == 'louple815@gmail.com' &&
+         request.auth.token.email_verified == true)
       );
     }
 
@@ -71,7 +88,8 @@ service cloud.firestore {
              (!('establishmentName' in data) || (data.establishmentName is string && data.establishmentName.size() <= 120)) &&
              (!('establishmentId' in data) || (data.establishmentId is string && data.establishmentId.size() <= 128)) &&
              (!('bio' in data) || (data.bio is string && data.bio.size() <= 600)) &&
-             (!('photoData' in data) || (data.photoData is string && data.photoData.size() <= 350000)) &&
+             (!('photoUrl' in data) || isValidHttpUrl(data.photoUrl)) &&
+             (!('photoStoragePath' in data) || isValidStoragePath(data.photoStoragePath)) &&
              data.verified is bool &&
              data.suspended is bool &&
              data.discoverable is bool &&
@@ -114,9 +132,12 @@ service cloud.firestore {
              data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
              data.visibility in ['PUBLIC', 'GROUP'] &&
              (!('groupId' in data) || (data.groupId is string && data.groupId.size() <= 128)) &&
-             (!('imageData' in data) || (data.imageData is string && data.imageData.size() <= 350000)) &&
+             (!('imageUrl' in data) || isValidHttpUrl(data.imageUrl)) &&
+             (!('imageStoragePath' in data) || isValidStoragePath(data.imageStoragePath)) &&
              (!('attachmentName' in data) || (data.attachmentName is string && data.attachmentName.size() <= 160)) &&
              (!('attachmentType' in data) || (data.attachmentType is string && data.attachmentType.size() <= 40)) &&
+             (!('attachmentUrl' in data) || isValidHttpUrl(data.attachmentUrl)) &&
+             (!('attachmentStoragePath' in data) || isValidStoragePath(data.attachmentStoragePath)) &&
              data.likesCount is int && data.likesCount >= 0 &&
              data.commentsCount is int && data.commentsCount >= 0 &&
              data.sharesCount is int && data.sharesCount >= 0 &&
@@ -194,6 +215,7 @@ service cloud.firestore {
              (!('region' in data) || (data.region is string && data.region.size() <= 80)) &&
              data.privacy in ['PUBLIC', 'PRIVATE', 'INVITE_ONLY'] &&
              (!('rules' in data) || (data.rules is string && data.rules.size() <= 1000)) &&
+             (!('lastMemberUserId' in data) || (data.lastMemberUserId is string && data.lastMemberUserId.size() <= 128)) &&
              data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
              data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 120 &&
              data.membersCount is int && data.membersCount >= 1 &&
@@ -220,8 +242,15 @@ service cloud.firestore {
              data.level is string && data.level.size() >= 1 && data.level.size() <= 80 &&
              data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 160 &&
              data.mimeType is string && data.mimeType.size() >= 1 && data.mimeType.size() <= 100 &&
-             data.fileSizeBytes is int && data.fileSizeBytes >= 0 && data.fileSizeBytes <= 5000000 &&
-             (!('contentBody' in data) || (data.contentBody is string && data.contentBody.size() <= 450000)) &&
+             data.fileSizeBytes is int && data.fileSizeBytes >= 0 && data.fileSizeBytes <= 20000000 &&
+             (!('fileUrl' in data) || isValidHttpUrl(data.fileUrl)) &&
+             (!('storagePath' in data) || isValidStoragePath(data.storagePath)) &&
+             (!('contentBody' in data) || (
+               data.contentBody is string &&
+               data.contentBody.size() <= 50000 &&
+               !data.contentBody.matches('^base64:.*') &&
+               !data.contentBody.matches('^data:.*')
+             )) &&
              data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
              data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120 &&
              data.visibility in ['PUBLIC', 'GROUP'] &&
@@ -269,7 +298,10 @@ service cloud.firestore {
              data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 120 &&
              data.text is string && data.text.size() <= 2000 &&
              (!('attachmentName' in data) || (data.attachmentName is string && data.attachmentName.size() <= 160)) &&
-             (!('attachmentData' in data) || (data.attachmentData is string && data.attachmentData.size() <= 350000)) &&
+             (!('attachmentUrl' in data) || isValidHttpUrl(data.attachmentUrl)) &&
+             (!('attachmentStoragePath' in data) || isValidStoragePath(data.attachmentStoragePath)) &&
+             (!('attachmentMimeType' in data) || (data.attachmentMimeType is string && data.attachmentMimeType.size() <= 100)) &&
+             (!('attachmentSizeBytes' in data) || (data.attachmentSizeBytes is int && data.attachmentSizeBytes >= 0 && data.attachmentSizeBytes <= 10000000)) &&
              isValidTimestamp(data.createdAt);
     }
 
@@ -343,9 +375,10 @@ service cloud.firestore {
 
       allow create: if isOwner(userId) && isValidId(userId) &&
                        isValidUserPublic(incoming()) &&
+                       !('photoData' in incoming()) &&
                        incoming().userId == request.auth.uid &&
                        incoming().keys().hasAll(['userId', 'firstName', 'lastName', 'displayName', 'role', 'country', 'city', 'region', 'verified', 'suspended', 'discoverable', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'firstName', 'lastName', 'displayName', 'role', 'country', 'city', 'region', 'jobTitle', 'subject', 'schoolLevel', 'establishmentName', 'establishmentId', 'bio', 'photoData', 'verified', 'suspended', 'discoverable', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'firstName', 'lastName', 'displayName', 'role', 'country', 'city', 'region', 'jobTitle', 'subject', 'schoolLevel', 'establishmentName', 'establishmentId', 'bio', 'photoUrl', 'photoStoragePath', 'verified', 'suspended', 'discoverable', 'createdAt', 'updatedAt']) &&
                        (isAdmin() || (incoming().role in ['ENSEIGNANT', 'RESPONSABLE_ETABLISSEMENT'] && incoming().verified == false && incoming().suspended == false));
 
       allow update: if isSignedIn() && isValidId(userId) &&
@@ -357,7 +390,7 @@ service cloud.firestore {
                           incoming().role == existing().role &&
                           incoming().verified == existing().verified &&
                           incoming().suspended == existing().suspended &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['firstName', 'lastName', 'displayName', 'country', 'city', 'region', 'jobTitle', 'subject', 'schoolLevel', 'establishmentName', 'establishmentId', 'bio', 'photoData', 'discoverable', 'updatedAt']))
+                          incoming().diff(existing()).affectedKeys().hasOnly(['firstName', 'lastName', 'displayName', 'country', 'city', 'region', 'jobTitle', 'subject', 'schoolLevel', 'establishmentName', 'establishmentId', 'bio', 'photoUrl', 'photoStoragePath', 'discoverable', 'updatedAt']))
                        );
 
       allow delete: if isValidId(userId) && (isOwner(userId) || isAdmin());
@@ -394,6 +427,7 @@ service cloud.firestore {
 
       allow create: if isSignedIn() && isValidId(postId) &&
                        isValidPost(incoming()) &&
+                       !('imageData' in incoming()) &&
                        isNotSuspended() &&
                        incoming().authorId == request.auth.uid &&
                        incoming().likesCount == 0 &&
@@ -401,7 +435,7 @@ service cloud.firestore {
                        incoming().sharesCount == 0 &&
                        incoming().status == 'ACTIVE' &&
                        incoming().keys().hasAll(['authorId', 'authorName', 'authorRole', 'authorVerified', 'content', 'category', 'visibility', 'likesCount', 'commentsCount', 'sharesCount', 'status', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['authorId', 'authorName', 'authorRole', 'authorVerified', 'content', 'category', 'visibility', 'groupId', 'imageData', 'attachmentName', 'attachmentType', 'likesCount', 'commentsCount', 'sharesCount', 'status', 'createdAt', 'updatedAt']);
+                       incoming().keys().hasOnly(['authorId', 'authorName', 'authorRole', 'authorVerified', 'content', 'category', 'visibility', 'groupId', 'imageUrl', 'imageStoragePath', 'attachmentName', 'attachmentType', 'attachmentUrl', 'attachmentStoragePath', 'likesCount', 'commentsCount', 'sharesCount', 'status', 'createdAt', 'updatedAt']);
 
       allow update: if isSignedIn() && isValidId(postId) &&
                        isValidPost(incoming()) &&
@@ -410,16 +444,18 @@ service cloud.firestore {
                          isModerator() ||
                          (existing().authorId == request.auth.uid && existing().status == 'ACTIVE' &&
                           incoming().status == existing().status &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['content', 'category', 'imageData', 'attachmentName', 'attachmentType', 'updatedAt'])) ||
+                          incoming().diff(existing()).affectedKeys().hasOnly(['content', 'category', 'imageUrl', 'imageStoragePath', 'attachmentName', 'attachmentType', 'attachmentUrl', 'attachmentStoragePath', 'updatedAt'])) ||
+                         // Correction 7: likesCount +/-1 strictly coupled to atomic /reactions/{uid} creation or deletion
                          (isNotSuspended() && existing().status == 'ACTIVE' &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'updatedAt']) &&
-                          (incoming().likesCount == existing().likesCount + 1 || incoming().likesCount == existing().likesCount - 1)) ||
-                         (isNotSuspended() && existing().status == 'ACTIVE' &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount', 'updatedAt']) &&
-                          incoming().commentsCount == existing().commentsCount + 1) ||
-                         (isNotSuspended() && existing().status == 'ACTIVE' &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['sharesCount', 'updatedAt']) &&
-                          incoming().sharesCount == existing().sharesCount + 1)
+                          incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'updatedAt']) && (
+                            (incoming().likesCount == existing().likesCount + 1 &&
+                             !exists(/databases/$(database)/documents/posts/$(postId)/reactions/$(request.auth.uid)) &&
+                             existsAfter(/databases/$(database)/documents/posts/$(postId)/reactions/$(request.auth.uid))) ||
+                            (incoming().likesCount == existing().likesCount - 1 &&
+                             incoming().likesCount >= 0 &&
+                             exists(/databases/$(database)/documents/posts/$(postId)/reactions/$(request.auth.uid)) &&
+                             !existsAfter(/databases/$(database)/documents/posts/$(postId)/reactions/$(request.auth.uid)))
+                          ))
                        );
 
       allow delete: if isSignedIn() && isValidId(postId) && (existing().authorId == request.auth.uid || isModerator());
@@ -427,12 +463,24 @@ service cloud.firestore {
       match /reactions/{userId} {
         allow get, list: if isSignedIn();
         allow create: if isOwner(userId) && isValidId(postId) && isValidId(userId) &&
+                         isNotSuspended() &&
                          isValidReaction(incoming()) &&
                          incoming().postId == postId &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['postId', 'userId', 'type', 'createdAt']) &&
                          incoming().keys().hasOnly(['postId', 'userId', 'type', 'createdAt']);
         allow delete: if isOwner(userId) && isValidId(postId) && isValidId(userId);
+      }
+
+      match /shares/{shareId} {
+        allow get, list: if isSignedIn();
+        allow create: if isSignedIn() && isValidId(postId) && isValidId(shareId) &&
+                         isNotSuspended() &&
+                         incoming().postId == postId &&
+                         incoming().userId == request.auth.uid &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         incoming().keys().hasAll(['postId', 'userId', 'createdAt']) &&
+                         incoming().keys().hasOnly(['postId', 'userId', 'createdAt']);
       }
     }
 
@@ -482,10 +530,7 @@ service cloud.firestore {
                        incoming().createdAt == existing().createdAt && (
                          isModerator() ||
                          (existing().authorId == request.auth.uid && existing().status == 'OPEN' &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'question', 'category', 'status', 'pollId', 'updatedAt'])) ||
-                         (isNotSuspended() && existing().status == 'OPEN' &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['argumentsCount', 'updatedAt']) &&
-                          incoming().argumentsCount == existing().argumentsCount + 1)
+                          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'question', 'category', 'status', 'pollId', 'updatedAt']))
                        );
 
       allow delete: if isSignedIn() && isValidId(debateId) && (existing().authorId == request.auth.uid || isModerator());
@@ -551,11 +596,32 @@ service cloud.firestore {
                        incoming().ownerId == existing().ownerId &&
                        incoming().createdAt == existing().createdAt && (
                          isModerator() ||
+                         // Owner metadata edits cannot arbitrarily alter membersCount
                          (existing().ownerId == request.auth.uid &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'domain', 'subject', 'level', 'region', 'privacy', 'rules', 'membersCount', 'updatedAt'])) ||
+                          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'domain', 'subject', 'level', 'region', 'privacy', 'rules', 'updatedAt'])) ||
+                         // Correction 8: User self-joining a group atomically (+1 only if membership transitions to ACTIVE)
                          (isNotSuspended() &&
                           incoming().diff(existing()).affectedKeys().hasOnly(['membersCount', 'updatedAt']) &&
-                          (incoming().membersCount == existing().membersCount + 1 || incoming().membersCount == existing().membersCount - 1))
+                          incoming().membersCount == existing().membersCount + 1 &&
+                          !exists(/databases/$(database)/documents/group_members/$(groupId + '_' + request.auth.uid)) &&
+                          existsAfter(/databases/$(database)/documents/group_members/$(groupId + '_' + request.auth.uid)) &&
+                          getAfter(/databases/$(database)/documents/group_members/$(groupId + '_' + request.auth.uid)).data.status == 'ACTIVE') ||
+                         // Correction 8: Active member leaving a group atomically (-1 only if ACTIVE doc is deleted)
+                         (isNotSuspended() &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['membersCount', 'updatedAt']) &&
+                          incoming().membersCount == existing().membersCount - 1 &&
+                          incoming().membersCount >= 1 &&
+                          exists(/databases/$(database)/documents/group_members/$(groupId + '_' + request.auth.uid)) &&
+                          get(/databases/$(database)/documents/group_members/$(groupId + '_' + request.auth.uid)).data.status == 'ACTIVE' &&
+                          !existsAfter(/databases/$(database)/documents/group_members/$(groupId + '_' + request.auth.uid))) ||
+                         // Correction 8: Owner approving a non-ACTIVE member request atomically (+1 backed by getAfter ACTIVE)
+                         (existing().ownerId == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['membersCount', 'lastMemberUserId', 'updatedAt']) &&
+                          incoming().lastMemberUserId is string && isValidId(incoming().lastMemberUserId) &&
+                          incoming().membersCount == existing().membersCount + 1 &&
+                          exists(/databases/$(database)/documents/group_members/$(groupId + '_' + incoming().lastMemberUserId)) &&
+                          get(/databases/$(database)/documents/group_members/$(groupId + '_' + incoming().lastMemberUserId)).data.status != 'ACTIVE' &&
+                          getAfter(/databases/$(database)/documents/group_members/$(groupId + '_' + incoming().lastMemberUserId)).data.status == 'ACTIVE')
                        );
 
       allow delete: if isSignedIn() && isValidId(groupId) && (existing().ownerId == request.auth.uid || isAdmin());
@@ -568,11 +634,26 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidId(memberDocId) &&
                        isValidGroupMember(incoming()) &&
                        isNotSuspended() &&
+                       exists(/databases/$(database)/documents/groups/$(incoming().groupId)) &&
                        memberDocId == (incoming().groupId + '_' + incoming().userId) && (
-                         (incoming().userId == request.auth.uid && incoming().memberRole == 'MEMBER') ||
-                         (incoming().userId == request.auth.uid && incoming().memberRole == 'OWNER' &&
+                         // Correction 3: Self-join enforces PUBLIC -> ACTIVE, PRIVATE/INVITE_ONLY -> PENDING (no bypass)
+                         (incoming().userId == request.auth.uid &&
+                          incoming().memberRole == 'MEMBER' && (
+                            (get(/databases/$(database)/documents/groups/$(incoming().groupId)).data.privacy == 'PUBLIC' &&
+                             incoming().status == 'ACTIVE' &&
+                             incoming().visibility == 'PUBLIC') ||
+                            (get(/databases/$(database)/documents/groups/$(incoming().groupId)).data.privacy in ['PRIVATE', 'INVITE_ONLY'] &&
+                             incoming().status == 'PENDING' &&
+                             incoming().visibility == 'PRIVATE')
+                          )) ||
+                         // Group creator initializing their OWNER membership
+                         (incoming().userId == request.auth.uid &&
+                          incoming().memberRole == 'OWNER' &&
+                          incoming().status == 'ACTIVE' &&
                           get(/databases/$(database)/documents/groups/$(incoming().groupId)).data.ownerId == request.auth.uid) ||
-                         (get(/databases/$(database)/documents/groups/$(incoming().groupId)).data.ownerId == request.auth.uid)
+                         // Group owner inviting/adding another member
+                         (get(/databases/$(database)/documents/groups/$(incoming().groupId)).data.ownerId == request.auth.uid &&
+                          incoming().status in ['INVITED', 'ACTIVE'])
                        ) &&
                        incoming().keys().hasAll(['groupId', 'userId', 'userName', 'userRole', 'memberRole', 'status', 'visibility', 'joinedAt']) &&
                        incoming().keys().hasOnly(['groupId', 'userId', 'userName', 'userRole', 'memberRole', 'status', 'visibility', 'joinedAt']);
@@ -605,7 +686,7 @@ service cloud.firestore {
                        incoming().authorId == request.auth.uid &&
                        incoming().downloadsCount == 0 &&
                        incoming().keys().hasAll(['title', 'resourceType', 'subject', 'level', 'fileName', 'mimeType', 'fileSizeBytes', 'authorId', 'authorName', 'visibility', 'downloadsCount', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['title', 'description', 'resourceType', 'subject', 'level', 'fileName', 'mimeType', 'fileSizeBytes', 'contentBody', 'authorId', 'authorName', 'visibility', 'groupId', 'downloadsCount', 'createdAt', 'updatedAt']);
+                       incoming().keys().hasOnly(['title', 'description', 'resourceType', 'subject', 'level', 'fileName', 'mimeType', 'fileSizeBytes', 'fileUrl', 'storagePath', 'contentBody', 'authorId', 'authorName', 'visibility', 'groupId', 'downloadsCount', 'createdAt', 'updatedAt']);
 
       allow update: if isSignedIn() && isValidId(resourceId) &&
                        isValidResource(incoming()) &&
@@ -613,13 +694,21 @@ service cloud.firestore {
                        incoming().createdAt == existing().createdAt && (
                          isModerator() ||
                          (existing().authorId == request.auth.uid &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'subject', 'level', 'updatedAt'])) ||
-                         (isNotSuspended() &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['downloadsCount', 'updatedAt']) &&
-                          incoming().downloadsCount == existing().downloadsCount + 1)
+                          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'subject', 'level', 'updatedAt']))
                        );
 
       allow delete: if isSignedIn() && isValidId(resourceId) && (existing().authorId == request.auth.uid || isModerator());
+
+      match /downloads/{downloadId} {
+        allow get, list: if isSignedIn() && (resource.data.userId == request.auth.uid || isModerator());
+        allow create: if isSignedIn() && isValidId(resourceId) && isValidId(downloadId) &&
+                         isNotSuspended() &&
+                         incoming().resourceId == resourceId &&
+                         incoming().userId == request.auth.uid &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         incoming().keys().hasAll(['resourceId', 'userId', 'createdAt']) &&
+                         incoming().keys().hasOnly(['resourceId', 'userId', 'createdAt']);
+      }
     }
 
     match /establishments/{establishmentId} {
@@ -663,8 +752,12 @@ service cloud.firestore {
       allow update: if isSignedIn() && isValidId(conversationId) &&
                        isValidConversation(incoming()) &&
                        request.auth.uid in existing().participantIds &&
+                       request.auth.uid in incoming().participantIds &&
+                       incoming().type == existing().type &&
                        incoming().createdBy == existing().createdBy &&
                        incoming().createdAt == existing().createdAt &&
+                       ((existing().type == 'DIRECT' && incoming().participantIds == existing().participantIds) ||
+                        (existing().type == 'GROUP' && (incoming().participantIds == existing().participantIds || existing().createdBy == request.auth.uid))) &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'participantIds', 'participantSummary', 'lastMessage', 'lastMessageAt', 'updatedAt']);
 
       allow delete: if isSignedIn() && isValidId(conversationId) && existing().createdBy == request.auth.uid;
@@ -674,15 +767,17 @@ service cloud.firestore {
       allow get: if isSignedIn() && isValidId(messageId) && request.auth.uid in resource.data.participantIds;
       allow list: if isSignedIn() && request.auth.uid in resource.data.participantIds;
 
+      // Correction 4: Strict verification that message participantIds matches parent conversation exactly
       allow create: if isSignedIn() && isValidId(messageId) &&
                        isValidMessage(incoming()) &&
+                       !('attachmentData' in incoming()) &&
                        isNotSuspended() &&
                        incoming().senderId == request.auth.uid &&
-                       request.auth.uid in incoming().participantIds &&
                        exists(/databases/$(database)/documents/conversations/$(incoming().conversationId)) &&
                        request.auth.uid in get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.participantIds &&
+                       incoming().participantIds == get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.participantIds &&
                        incoming().keys().hasAll(['conversationId', 'participantIds', 'senderId', 'senderName', 'text', 'createdAt']) &&
-                       incoming().keys().hasOnly(['conversationId', 'participantIds', 'senderId', 'senderName', 'text', 'attachmentName', 'attachmentData', 'createdAt']);
+                       incoming().keys().hasOnly(['conversationId', 'participantIds', 'senderId', 'senderName', 'text', 'attachmentName', 'attachmentUrl', 'attachmentStoragePath', 'attachmentMimeType', 'attachmentSizeBytes', 'createdAt']);
 
       allow delete: if isSignedIn() && isValidId(messageId) && existing().senderId == request.auth.uid;
     }
@@ -691,12 +786,8 @@ service cloud.firestore {
       allow get: if isSignedIn() && isValidId(notificationId) && resource.data.recipientId == request.auth.uid;
       allow list: if isSignedIn() && resource.data.recipientId == request.auth.uid;
 
-      allow create: if isSignedIn() && isValidId(notificationId) &&
-                       isValidNotification(incoming()) &&
-                       incoming().actorId == request.auth.uid &&
-                       incoming().read == false &&
-                       incoming().keys().hasAll(['recipientId', 'actorId', 'actorName', 'type', 'title', 'body', 'read', 'createdAt']) &&
-                       incoming().keys().hasOnly(['recipientId', 'actorId', 'actorName', 'type', 'title', 'body', 'targetId', 'read', 'createdAt']);
+      // Notifications can only be created by server-side Cloud Functions via Admin SDK
+      allow create: if false;
 
       allow update: if isSignedIn() && isValidId(notificationId) &&
                        isValidNotification(incoming()) &&

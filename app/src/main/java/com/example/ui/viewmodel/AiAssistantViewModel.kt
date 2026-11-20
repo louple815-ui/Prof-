@@ -46,6 +46,16 @@ class AiAssistantViewModel(
     fun askAssistant(prompt: String, lang: String) {
         val cleaned = prompt.trim()
         if (cleaned.isEmpty()) return
+        if (cleaned.length > AiAssistantRepository.MAX_PROMPT_CHARS) {
+            _uiState.value = AiUiState.Error(
+                if (lang == "en") {
+                    "Prompt exceeds the ${AiAssistantRepository.MAX_PROMPT_CHARS}-character limit."
+                } else {
+                    "Votre demande dépasse la limite de ${AiAssistantRepository.MAX_PROMPT_CHARS} caractères."
+                }
+            )
+            return
+        }
         val mode = _selectedMode.value
         viewModelScope.launch {
             _uiState.value = AiUiState.Loading
@@ -59,11 +69,17 @@ class AiAssistantViewModel(
                     _uiState.value = AiUiState.Success(finalText)
                     _history.value = listOf(AiExchange(mode, cleaned, finalText)) + _history.value
                 } else {
-                    _uiState.value = AiUiState.Error("L'assistant n'a renvoyé aucune réponse.")
+                    _uiState.value = AiUiState.Error(
+                        if (lang == "en") "The assistant returned an empty response."
+                        else "L'assistant n'a renvoyé aucune réponse."
+                    )
                 }
             } catch (e: TimeoutCancellationException) {
                 Log.e(TAG, "AI generation timed out", e)
-                _uiState.value = AiUiState.Error("Délai dépassé (60s). Veuillez réessayer avec une demande plus courte.")
+                _uiState.value = AiUiState.Error(
+                    if (lang == "en") "Request timed out (60s). Please try a shorter prompt."
+                    else "Délai dépassé (60s). Veuillez réessayer avec une demande plus courte."
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
