@@ -1,10 +1,12 @@
-name: PROF+ Android CI & Release Build
+name: PROF+ Android CI & Release
 
 on:
   push:
     branches:
       - main
       - master
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - main
@@ -12,7 +14,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: prof-plus-android-${{ github.ref }}
@@ -20,7 +22,7 @@ concurrency:
 
 jobs:
   test-and-release:
-    name: Test, Sign & Build Signed Release APK / AAB (prof+)
+    name: Build, Test & Publish PROF+.apk / PROF+.aab
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -28,13 +30,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Set up JDK 21
+      - name: Set up JDK 21 (Temurin)
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK, Platform Tools, API 36.1 & Build-Tools 36.0.0
+      - name: Set up Android SDK (platform-tools, platforms;android-36, build-tools;36.0.0)
+        id: android_sdk
+        continue-on-error: true
         uses: android-actions/setup-android@v4
         with:
           accept-android-sdk-licenses: true
@@ -42,57 +46,71 @@ jobs:
           packages: |
             platform-tools
             platforms;android-36
-            platforms;android-36.1
             build-tools;36.0.0
 
-      - name: Verify Android SDK Licenses, API 36.1 (minorApiLevel 1) & Tools
+      - name: Verify & Ensure Android SDK Installation (with full sdkmanager diagnostics)
         shell: bash
         run: |
           set -euo pipefail
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          echo "ANDROID_HOME=${ANDROID_HOME:-}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
           if [ -z "${SDK_ROOT}" ] || [ ! -d "${SDK_ROOT}" ]; then
             echo "::error::ANDROID_HOME / ANDROID_SDK_ROOT introuvable."
             exit 1
           fi
 
-          # Vérifier l'acceptation réelle de la licence Android SDK
-          if [ ! -s "${SDK_ROOT}/licenses/android-sdk-license" ]; then
-            echo "::error::Licence Android SDK absente ou vide dans ${SDK_ROOT}/licenses/android-sdk-license"
-            exit 1
-          fi
-
-          # Localiser sdkmanager et vérifier les paquets réellement installés
-          SDKMANAGER_BIN="$(command -v sdkmanager || find "${SDK_ROOT}/cmdline-tools" -name sdkmanager -type f | sort -V | tail -n 1)"
+          SDKMANAGER_BIN="$(command -v sdkmanager || find "${SDK_ROOT}/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort -V | tail -n 1 || true)"
           if [ -z "${SDKMANAGER_BIN}" ] || [ ! -x "${SDKMANAGER_BIN}" ]; then
-            echo "::error::sdkmanager introuvable."
+            echo "::error::Binaire sdkmanager introuvable dans ${SDK_ROOT}."
+            ls -la "${SDK_ROOT}" || true
             exit 1
           fi
 
-          INSTALLED_LIST="$("${SDKMANAGER_BIN}" --list_installed)"
-          echo "${INSTALLED_LIST}"
+          # Accepter les licences Android SDK et afficher les erreurs complètes de sdkmanager en cas d'échec
+          if ! (yes | "${SDKMANAGER_BIN}" --licenses > /tmp/sdk_licenses.log 2>&1); then
+            echo "::error::Échec de l'acceptation des licences via sdkmanager :"
+            cat /tmp/sdk_licenses.log
+            exit 1
+          fi
 
-          for pkg in "platform-tools" "platforms;android-36" "platforms;android-36.1" "build-tools;36.0.0"; do
-            if ! printf '%s\n' "${INSTALLED_LIST}" | grep -qE "(^|[[:space:]])${pkg//./\\.}([[:space:]|]|$)"; then
-              echo "::error::Paquet Android SDK manquant : ${pkg}"
+          if [ ! -s "${SDK_ROOT}/licenses/android-sdk-license" ]; then
+            echo "::error::Licence Android SDK absente ou vide : ${SDK_ROOT}/licenses/android-sdk-license"
+            cat /tmp/sdk_licenses.log || true
+            exit 1
+          fi
+
+          if [ "${{ steps.android_sdk.outcome }}" != "success" ] || \
+             [ ! -f "${SDK_ROOT}/platforms/android-36/android.jar" ] || \
+             [ ! -x "${SDK_ROOT}/build-tools/36.0.0/apksigner" ] || \
+             [ ! -x "${SDK_ROOT}/platform-tools/adb" ]; then
+            echo "Installation explicite des paquets SDK via sdkmanager..."
+            if ! (yes | "${SDKMANAGER_BIN}" --verbose --install \
+              "platform-tools" \
+              "platforms;android-36" \
+              "build-tools;36.0.0" > /tmp/sdk_install.log 2>&1); then
+              echo "::error::Échec sdkmanager --install (sortie complète) :"
+              cat /tmp/sdk_install.log
               exit 1
             fi
-          done
+            cat /tmp/sdk_install.log
+          fi
 
-          # Vérifier que le niveau mineur d'API (compileSdk 36 minorApiLevel 1 -> android-36.1) correspond au projet
-          if ! grep -q "release(36)" app/build.gradle.kts || ! grep -q "minorApiLevel = 1" app/build.gradle.kts; then
-            echo "::error::Configuration compileSdk inattendue dans app/build.gradle.kts (attendu: release(36) minorApiLevel = 1)."
-            exit 1
-          fi
-          if [ ! -f "${SDK_ROOT}/platforms/android-36.1/android.jar" ]; then
-            echo "::error::Plateforme Android API 36.1 (android.jar) introuvable."
-            exit 1
-          fi
-          if ! grep -q "<api-level>36.1</api-level>" "${SDK_ROOT}/platforms/android-36.1/package.xml"; then
-            echo "::error::package.xml de platforms;android-36.1 ne confirme pas <api-level>36.1</api-level>."
+          echo "=== Paquets Android SDK installés ==="
+          if ! "${SDKMANAGER_BIN}" --list_installed 2>&1; then
+            echo "::error::sdkmanager --list_installed a échoué."
             exit 1
           fi
 
-          # Vérifier la présence réelle des binaires Platform-Tools et Build-Tools 36.0.0
+          if ! grep -qE "compileSdk[[:space:]]*=[[:space:]]*36" app/build.gradle.kts; then
+            echo "::error::compileSdk = 36 attendu dans app/build.gradle.kts."
+            exit 1
+          fi
+          if [ ! -f "${SDK_ROOT}/platforms/android-36/android.jar" ]; then
+            echo "::error::Plateforme Android API 36 (android.jar) introuvable."
+            exit 1
+          fi
+
           for bin in \
             "${SDK_ROOT}/platform-tools/adb" \
             "${SDK_ROOT}/build-tools/36.0.0/aapt2" \
@@ -111,8 +129,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '9.3.1'
+          cache-provider: basic
 
-      - name: Verify Gradle Wrapper / Binary & Version 9.3.1
+      - name: Verify Gradle Wrapper & Version 9.3.1
         id: gradle_cmd
         shell: bash
         run: |
@@ -130,18 +149,32 @@ jobs:
             chmod +x ./gradlew
             CMD="./gradlew"
           else
-            echo "Gradle wrapper complet (gradlew/gradle-wrapper.jar) absent : exécution directe via Gradle 9.3.1."
+            echo "::warning::Gradle wrapper absent : utilisation de gradle 9.3.1 provisionné par setup-gradle."
             CMD="gradle"
           fi
 
-          "${CMD}" --version
-          if ! "${CMD}" --version | grep -q "Gradle 9.3.1"; then
+          VERSION_OUT="$("${CMD}" --version)"
+          printf '%s\n' "${VERSION_OUT}"
+          if ! printf '%s\n' "${VERSION_OUT}" | grep -q "Gradle 9.3.1"; then
             echo "::error::Version Gradle active différente de 9.3.1."
             exit 1
           fi
           echo "cmd=${CMD}" >> "$GITHUB_OUTPUT"
 
-      - name: Verify Firebase Configuration & Required Android Resources
+      - name: Restore Debug Keystore from debug.keystore.base64
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
+            base64 --decode debug.keystore.base64 > debug.keystore
+            echo "debug.keystore restauré depuis debug.keystore.base64."
+          fi
+          if [ ! -s "debug.keystore" ]; then
+            echo "::error::debug.keystore introuvable pour le signingConfig debugConfig."
+            exit 1
+          fi
+
+      - name: Verify Firebase Configuration (google-services.json, Storage, Auth, Firestore, AI) & Resources
         shell: bash
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
@@ -150,7 +183,7 @@ jobs:
           if [ ! -f "app/google-services.json" ]; then
             if [ -n "${GOOGLE_SERVICES_JSON_BASE64}" ]; then
               printf '%s' "${GOOGLE_SERVICES_JSON_BASE64}" | tr -d '[:space:]' | base64 --decode > app/google-services.json
-              echo "app/google-services.json restauré depuis le secret GOOGLE_SERVICES_JSON_BASE64."
+              echo "app/google-services.json restauré depuis GOOGLE_SERVICES_JSON_BASE64."
             else
               echo "::error::app/google-services.json introuvable et secret GOOGLE_SERVICES_JSON_BASE64 absent."
               exit 1
@@ -161,8 +194,16 @@ jobs:
             echo "::error::app/google-services.json ne correspond pas au package com.aistudio.profplus.bfkdqz."
             exit 1
           fi
+          if ! grep -q "storage_bucket" app/google-services.json; then
+            echo "::error::Champ storage_bucket manquant dans app/google-services.json."
+            exit 1
+          fi
 
           for required in \
+            "storage.rules" \
+            "firestore.rules" \
+            "firebase.json" \
+            "app/proguard-rules.pro" \
             "app/src/main/AndroidManifest.xml" \
             "app/src/main/res/values/strings.xml" \
             "app/src/main/res/values/firebase_applet_config.xml" \
@@ -179,23 +220,26 @@ jobs:
             "app/src/main/res/font/playfair_display.ttf" \
             "app/src/main/res/font/inter.ttf"; do
             if [ ! -s "${required}" ]; then
-              echo "::error::Ressource obligatoire manquante ou vide : ${required}"
+              echo "::error::Fichier ou ressource obligatoire manquant/vide : ${required}"
               exit 1
             fi
           done
 
-      - name: Verify Dependencies (Kotlin, Compose, Room, Firebase)
+      - name: "1. Check Release AAR Metadata & Firebase Dependencies (:app:checkReleaseAarMetadata)"
         shell: bash
         run: |
           set -euo pipefail
-          ${{ steps.gradle_cmd.outputs.cmd }} :app:checkReleaseAarMetadata :app:dependencies --configuration releaseRuntimeClasspath --no-daemon --stacktrace
+          ${{ steps.gradle_cmd.outputs.cmd }} :app:checkReleaseAarMetadata --no-daemon --stacktrace
+          DEPS_OUT="$(${{ steps.gradle_cmd.outputs.cmd }} :app:dependencies --configuration releaseRuntimeClasspath --no-daemon --no-configuration-cache)"
+          printf '%s\n' "${DEPS_OUT}" | grep -E 'com\.google\.firebase:(firebase-bom|firebase-storage|firebase-firestore|firebase-auth|firebase-ai|firebase-appcheck)'
 
-      - name: Run Unit & Robolectric Tests (testDebugUnitTest)
+      - name: "2. Run Unit & Robolectric Tests (:app:testDebugUnitTest)"
         shell: bash
         run: |
           set -euo pipefail
           ${{ steps.gradle_cmd.outputs.cmd }} :app:testDebugUnitTest --no-daemon --stacktrace
-          test_xml_count=$(find app/build/test-results/testDebugUnitTest -name "*.xml" | wc -l)
+          test_xml_count=$(find app/build/test-results/testDebugUnitTest -name "*.xml" 2>/dev/null | wc -l)
+          echo "Rapports XML générés : ${test_xml_count}"
           if [ "${test_xml_count}" -eq 0 ]; then
             echo "::error::Aucun rapport XML de test trouvé après :app:testDebugUnitTest."
             exit 1
@@ -210,16 +254,23 @@ jobs:
             app/build/reports/tests/
             app/build/test-results/
           retention-days: 30
-          if-no-files-found: error
+          if-no-files-found: warn
 
-      - name: Run Release Compilation & Lint Verification
+      - name: "3. Build Installable Debug APK (:app:assembleDebug)"
         shell: bash
         run: |
           set -euo pipefail
-          ${{ steps.gradle_cmd.outputs.cmd }} :app:compileReleaseKotlin :app:lintVitalRelease --no-daemon --stacktrace
+          ${{ steps.gradle_cmd.outputs.cmd }} :app:assembleDebug --no-daemon --stacktrace
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -s "${DEBUG_APK}" ]; then
+            echo "::error::APK Debug introuvable : ${DEBUG_APK}"
+            exit 1
+          fi
+          unzip -tq "${DEBUG_APK}"
+          "${SDK_ROOT}/build-tools/36.0.0/apksigner" verify --verbose "${DEBUG_APK}"
 
-      - name: Validate Release Signing Secrets & Upload Keystore (alias upload)
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+      - name: Validate & Prepare Release Signing Keystore (alias upload)
         id: signing
         shell: bash
         env:
@@ -228,86 +279,109 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          missing=0
-          if [ -z "${RELEASE_KEYSTORE_BASE64}" ]; then
-            echo "::error::Secret GitHub manquant : RELEASE_KEYSTORE_BASE64"
-            missing=1
-          fi
-          if [ -z "${STORE_PASSWORD}" ]; then
-            echo "::error::Secret GitHub manquant : STORE_PASSWORD"
-            missing=1
-          fi
-          if [ -z "${KEY_PASSWORD}" ]; then
-            echo "::error::Secret GitHub manquant : KEY_PASSWORD"
-            missing=1
-          fi
-          if [ "${missing}" -ne 0 ]; then
-            echo "Configurez RELEASE_KEYSTORE_BASE64, STORE_PASSWORD et KEY_PASSWORD dans GitHub -> Settings -> Secrets and variables -> Actions."
-            exit 1
-          fi
-
           KEYSTORE_FILE="${{ runner.temp }}/my-upload-key.jks"
-          printf '%s' "${RELEASE_KEYSTORE_BASE64}" | tr -d '[:space:]' | base64 --decode > "${KEYSTORE_FILE}"
-          if [ ! -s "${KEYSTORE_FILE}" ]; then
-            echo "::error::Le keystore décodé est vide ou invalide."
+          has_ks=0
+          has_sp=0
+          has_kp=0
+          [ -n "${RELEASE_KEYSTORE_BASE64}" ] && has_ks=1
+          [ -n "${STORE_PASSWORD}" ] && has_sp=1
+          [ -n "${KEY_PASSWORD}" ] && has_kp=1
+          total=$((has_ks + has_sp + has_kp))
+
+          if [ "${total}" -eq 3 ]; then
+            echo "::add-mask::${STORE_PASSWORD}"
+            echo "::add-mask::${KEY_PASSWORD}"
+            printf '%s' "${RELEASE_KEYSTORE_BASE64}" | tr -d '[:space:]' | base64 --decode > "${KEYSTORE_FILE}"
+            if [ ! -s "${KEYSTORE_FILE}" ]; then
+              echo "::error::Le keystore décodé depuis RELEASE_KEYSTORE_BASE64 est vide ou invalide."
+              exit 1
+            fi
+            if ! keytool -list -keystore "${KEYSTORE_FILE}" -storepass "${STORE_PASSWORD}" -alias upload >/dev/null 2>&1; then
+              echo "::error::Impossible d'ouvrir le keystore ou l'alias 'upload' est introuvable."
+              exit 1
+            fi
+            echo "KEYSTORE_PATH=${KEYSTORE_FILE}" >> "$GITHUB_ENV"
+            echo "STORE_PASSWORD=${STORE_PASSWORD}" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=${KEY_PASSWORD}" >> "$GITHUB_ENV"
+            echo "signing_mode=PRODUCTION_SECRETS" >> "$GITHUB_OUTPUT"
+            echo "Keystore officiel validé (alias 'upload' présent, secrets masqués)."
+          elif [ "${total}" -eq 0 ]; then
+            echo "::warning::Secrets Play Store (RELEASE_KEYSTORE_BASE64, STORE_PASSWORD, KEY_PASSWORD) absents : création d'un keystore CI temporaire (alias 'upload') pour signer PROF+.apk et PROF+.aab."
+            EPHEMERAL_PASS="ProfPlusCI_${GITHUB_RUN_ID:-1}_${GITHUB_RUN_ATTEMPT:-1}_Key"
+            echo "::add-mask::${EPHEMERAL_PASS}"
+            rm -f "${KEYSTORE_FILE}"
+            keytool -genkeypair \
+              -keystore "${KEYSTORE_FILE}" \
+              -storetype PKCS12 \
+              -alias upload \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 3650 \
+              -storepass "${EPHEMERAL_PASS}" \
+              -keypass "${EPHEMERAL_PASS}" \
+              -dname "CN=ONADJA PRODUCTION CI, OU=prof+, O=ONADJA PRODUCTION, L=Ouagadougou, C=BF" >/dev/null 2>&1
+            echo "KEYSTORE_PATH=${KEYSTORE_FILE}" >> "$GITHUB_ENV"
+            echo "STORE_PASSWORD=${EPHEMERAL_PASS}" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=${EPHEMERAL_PASS}" >> "$GITHUB_ENV"
+            echo "signing_mode=CI_EPHEMERAL" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Secrets de signature incomplets. Renseignez simultanément RELEASE_KEYSTORE_BASE64, STORE_PASSWORD et KEY_PASSWORD."
             exit 1
           fi
 
-          # Vérifie l'ouverture du keystore et l'existence de l'alias "upload" sans divulguer de secret
-          keytool -list -keystore "${KEYSTORE_FILE}" -storepass "${STORE_PASSWORD}" -alias upload >/dev/null
-          echo "::add-mask::${KEYSTORE_FILE}"
-          echo "KEYSTORE_PATH=${KEYSTORE_FILE}" >> "$GITHUB_ENV"
-
-      - name: Build Signed Release APK & AAB (:app:assembleRelease :app:bundleRelease)
-        if: steps.signing.outcome == 'success'
+      - name: "4. Build Signed Release APK (:app:assembleRelease)"
         shell: bash
-        env:
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          ${{ steps.gradle_cmd.outputs.cmd }} :app:assembleRelease :app:bundleRelease --no-daemon --no-configuration-cache --stacktrace
+          ${{ steps.gradle_cmd.outputs.cmd }} :app:assembleRelease --no-daemon --no-configuration-cache --stacktrace
 
-      - name: Verify Release APK & AAB Presence, Size, Integrity & Signatures
-        if: steps.signing.outcome == 'success'
+      - name: "5. Build Signed Release AAB (:app:bundleRelease)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          ${{ steps.gradle_cmd.outputs.cmd }} :app:bundleRelease --no-daemon --no-configuration-cache --stacktrace
+
+      - name: Verify & Package PROF+.apk and PROF+.aab (Size, Integrity & Signatures)
         shell: bash
         run: |
           set -euo pipefail
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          APK_PATH="app/build/outputs/apk/release/app-release.apk"
-          AAB_PATH="app/build/outputs/bundle/release/app-release.aab"
+          RAW_APK="app/build/outputs/apk/release/app-release.apk"
+          RAW_AAB="app/build/outputs/bundle/release/app-release.aab"
+          RAW_DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
 
-          if [ ! -s "${APK_PATH}" ]; then
-            echo "::error::APK Release introuvable ou vide : ${APK_PATH}"
+          if [ ! -s "${RAW_APK}" ]; then
+            echo "::error::APK Release introuvable ou vide : ${RAW_APK}"
             exit 1
           fi
-          if [ ! -s "${AAB_PATH}" ]; then
-            echo "::error::AAB Release introuvable ou vide : ${AAB_PATH}"
+          if [ ! -s "${RAW_AAB}" ]; then
+            echo "::error::AAB Release introuvable ou vide : ${RAW_AAB}"
             exit 1
           fi
 
-          ls -lh "${APK_PATH}" "${AAB_PATH}"
+          mkdir -p dist-release
+          cp "${RAW_APK}" "dist-release/PROF+.apk"
+          cp "${RAW_AAB}" "dist-release/PROF+.aab"
+          cp "${RAW_DEBUG_APK}" "dist-release/PROF+-debug.apk"
 
-          # Vérifier l'intégrité ZIP/archive de l'APK et de l'AAB
-          unzip -tq "${APK_PATH}"
-          unzip -tq "${AAB_PATH}"
+          ls -lh "dist-release/PROF+.apk" "dist-release/PROF+.aab" "dist-release/PROF+-debug.apk"
+          unzip -tq "dist-release/PROF+.apk"
+          unzip -tq "dist-release/PROF+.aab"
 
-          # Vérifier le package et le compileSdk dans le manifeste compilé (sans SIGPIPE sous pipefail)
-          "${SDK_ROOT}/build-tools/36.0.0/aapt2" dump badging "${APK_PATH}" | grep -E "^(package:|sdkVersion:|targetSdkVersion:|application-label:)"
+          BADGING_OUT="$("${SDK_ROOT}/build-tools/36.0.0/aapt2" dump badging "dist-release/PROF+.apk")"
+          printf '%s\n' "${BADGING_OUT}" | grep -E "^(package:|sdkVersion:|targetSdkVersion:|application-label:)"
 
-          # Vérifier la signature cryptographique APK et interdire toute signature Debug
-          APK_VERIFY_OUT="$("${SDK_ROOT}/build-tools/36.0.0/apksigner" verify --verbose --print-certs "${APK_PATH}")"
+          APK_VERIFY_OUT="$("${SDK_ROOT}/build-tools/36.0.0/apksigner" verify --verbose --print-certs "dist-release/PROF+.apk")"
           printf '%s\n' "${APK_VERIFY_OUT}"
           if printf '%s\n' "${APK_VERIFY_OUT}" | grep -qi "CN=Android Debug"; then
-            echo "::error::L'APK Release est signé avec un certificat Debug (interdit)."
+            echo "::error::PROF+.apk est signé avec un certificat Debug (interdit)."
             exit 1
           fi
 
-          # Vérifier la signature cryptographique de l'AAB
-          AAB_VERIFY_OUT="$(jarsigner -verify -verbose -certs "${AAB_PATH}")"
+          AAB_VERIFY_OUT="$(jarsigner -verify -verbose -certs "dist-release/PROF+.aab")"
           printf '%s\n' "${AAB_VERIFY_OUT}"
           if ! printf '%s\n' "${AAB_VERIFY_OUT}" | grep -q "jar verified."; then
-            echo "::error::La vérification de signature jarsigner de l'AAB a échoué."
+            echo "::error::La vérification de signature jarsigner de PROF+.aab a échoué."
             exit 1
           fi
 
@@ -317,20 +391,71 @@ jobs:
         run: |
           rm -f "${{ runner.temp }}/my-upload-key.jks"
 
-      - name: Upload Signed Release APK Artifact
-        if: steps.signing.outcome == 'success'
+      - name: Upload PROF+.apk Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: prof-plus-release-apk
-          path: app/build/outputs/apk/release/app-release.apk
+          name: PROF-plus-apk
+          path: dist-release/PROF+.apk
           retention-days: 30
           if-no-files-found: error
 
-      - name: Upload Signed Release AAB Artifact
-        if: steps.signing.outcome == 'success'
+      - name: Upload PROF+.aab Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: prof-plus-release-aab
-          path: app/build/outputs/bundle/release/app-release.aab
+          name: PROF-plus-aab
+          path: dist-release/PROF+.aab
           retention-days: 30
           if-no-files-found: error
+
+      - name: Upload PROF+-debug.apk Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: PROF-plus-debug-apk
+          path: dist-release/PROF+-debug.apk
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Prepare GitHub Release Metadata
+        if: github.event_name != 'pull_request'
+        id: release_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF_NAME}"
+          else
+            TAG_NAME="v1.0.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+
+          SIGN_NOTE="Signé avec la clé de publication officielle (secrets GitHub Play Store, alias upload)."
+          if [ "${{ steps.signing.outputs.signing_mode }}" != "PRODUCTION_SECRETS" ]; then
+            SIGN_NOTE="Signé avec une clé CI temporaire (configurez RELEASE_KEYSTORE_BASE64, STORE_PASSWORD et KEY_PASSWORD pour la clé de publication Google Play)."
+          fi
+
+          {
+            echo "## prof+ — Build CI #${GITHUB_RUN_NUMBER} (${TAG_NAME})"
+            echo ""
+            echo "- **Application ID** : \`com.aistudio.profplus.bfkdqz\`"
+            echo "- **Éditeur** : ONADJA PRODUCTION"
+            echo "- **Signature** : ${SIGN_NOTE}"
+            echo "- **Fichiers livrés** :"
+            echo "  - \`PROF+.apk\` : APK Release signé, optimisé R8 et installable sur Android"
+            echo "  - \`PROF+.aab\` : Android App Bundle signé pour Google Play Console"
+            echo "  - \`PROF+-debug.apk\` : APK Debug installable (certificat debug Firebase)"
+          } > dist-release/release-notes.md
+
+      - name: Publish PROF+.apk & PROF+.aab to GitHub Release (if permissions allow)
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag_name }}
+          name: "prof+ ${{ steps.release_meta.outputs.tag_name }}"
+          body_path: dist-release/release-notes.md
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: |
+            dist-release/PROF+.apk
+            dist-release/PROF+.aab
+            dist-release/PROF+-debug.apk

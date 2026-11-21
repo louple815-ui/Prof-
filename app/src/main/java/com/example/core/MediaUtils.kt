@@ -1,12 +1,15 @@
 package com.example.core
 
+import android.content.ContentResolver
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Base64
+import android.webkit.MimeTypeMap
 import java.io.ByteArrayOutputStream
+import java.util.Locale
 import kotlin.math.max
 
 data class PickedDocument(
@@ -32,6 +35,32 @@ object MediaUtils {
     const val MAX_ATTACHMENT_UPLOAD_BYTES = 10_000_000L
     const val MAX_RESOURCE_UPLOAD_BYTES = 20_000_000L
     private const val MAX_TEXT_PREVIEW_CHARS = 50_000
+
+    fun inferMimeType(resolver: ContentResolver, uri: Uri, fileName: String): String {
+        val resolved = resolver.getType(uri)
+        if (!resolved.isNullOrBlank() && resolved != "application/octet-stream") {
+            return resolved
+        }
+        val ext = fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        if (ext.isNotBlank()) {
+            val mapped = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+            if (!mapped.isNullOrBlank()) return mapped
+            when (ext) {
+                "pdf" -> return "application/pdf"
+                "txt", "md", "csv" -> return "text/plain"
+                "jpg", "jpeg" -> return "image/jpeg"
+                "png" -> return "image/png"
+                "webp" -> return "image/webp"
+                "doc" -> return "application/msword"
+                "docx" -> return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                "ppt" -> return "application/vnd.ms-powerpoint"
+                "pptx" -> return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                "xls" -> return "application/vnd.ms-excel"
+                "xlsx" -> return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
+        }
+        return resolved ?: "application/octet-stream"
+    }
 
     fun prepareImageBytes(
         context: Context,
@@ -84,7 +113,7 @@ object MediaUtils {
                     if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
                 }
             }
-            val mimeType = resolver.getType(uri) ?: "application/octet-stream"
+            val mimeType = inferMimeType(resolver, uri, name)
             if (size > maxBytes) {
                 return PickedDocument(
                     fileName = name,
@@ -146,7 +175,7 @@ object MediaUtils {
                     if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
                 }
             }
-            val mimeType = resolver.getType(uri) ?: "application/octet-stream"
+            val mimeType = inferMimeType(resolver, uri, name)
             if (size > maxBytes) {
                 return PickedUploadFile(name, mimeType, size, ByteArray(0), "", true)
             }
